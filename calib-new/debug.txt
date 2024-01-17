@@ -1,0 +1,21 @@
+              <value id="default">Manual</value>
+                <value id="default_test">Manual</value>
+        </setting>
+        <setting id="CameraData">
+                <type>str</type>
+                <value id="LeftStereoIntrinsic">[1.43164182e+03 0.00000000e+00 9.25759573e+02 0.00000000e+00
+ 1.43229729e+03 5.45828914e+02 0.00000000e+00 0.00000000e+00
+ 1.00000000e+00]</value>
+                <value id="RightStereoIntrinsic">[1.43253801e+03 0.00000000e+00 9.75664827e+02 0.00000000e+00
+ 1.43302284e+03 5.32614239e+02 0.00000000e+00 0.00000000e+00
+ 1.00000000e+00]</value>
+                <value id="RotationExtrinsic">[1. 0. 0. 0. 1. 0. 0. 0. 1.]</value>
+                <value id="TranslationExtrinsic">[65.  0.  0.]</value>
+                <value id="LeftCamRectificationHomography">[-1.09373354e-01  8.57090811e-03 -2.27466420e+01 -8.13117155e-04
+ -1.28446665e-01  2.97518648e+00  2.08003395e-05 -2.49115950e-06
+ -1.46044636e-01]</value>
+                <value id="RightCamRectificationHomography">[ 8.80342971e-01 -8.42628924e-02  1.60372710e+02  3.05325553e-02
+  1.00164788e+00 -3.02011067e+01 -1.19903637e-04  1.14766944e-05
+  1.10891008e+00]</value>
+        </setting>
+        <setting id="TZ">
