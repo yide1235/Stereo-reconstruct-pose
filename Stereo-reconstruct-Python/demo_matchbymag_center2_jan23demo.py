@@ -507,7 +507,7 @@ class StereoDepth(object):
                 
                 # print('111111111111111111', conf_sums_local[0]>max_min)
                 if result_depth<effective_range and conf_sums_local[0]>max_min:
-                
+                    print('valid frame')
                     if get_average:
                         # print('----',rectified_left_points_results)
                         #here assume just one person
@@ -527,33 +527,24 @@ class StereoDepth(object):
                                 
                                 center = [round(pr[0]), round(pr[1])]
                                 cv2.circle(rectifiedL_copy, center, 2, (0, 255, 0), -1)
-                                
-                    ## this is just for drawing
-                    # for rectified_left_points_result in rectified_left_points_results:
-                    #     for i in rectified_left_points_results:
-                    #         for pr in i:
-
-                    #             center = [round(pr[0][0]), round(pr[0][1])]
-                    #             cv2.circle(rectifiedL_copy, center, 2, (0, 255, 0), -1)
                         
                         
-                    #     x=rectified_left_points_result[6][0][0]
-                    #     y=rectified_left_points_result[6][0][1]
+                        # x=rectified_left_points_result[6][0][0]
+                        # y=rectified_left_points_result[6][0][1]
 
-                    #     text_to_draw=str(bbox_index)
-                    #     font = cv2.FONT_HERSHEY_SIMPLEX
-                    #     text_position = (x, y)  # Change it as per your requirement
+                        # text_to_draw=str(bbox_index)
+                        # font = cv2.FONT_HERSHEY_SIMPLEX
+                        # text_position = (x, y)  # Change it as per your requirement
 
-                    #     # Font scale and color
-                    #     font_scale = 1
-                    #     font_color = (255, 0, 0) # Blue color in BGR
+                        # # Font scale and color
+                        # font_scale = 1
+                        # font_color = (255, 0, 0) # Blue color in BGR
 
-                    #     # Line type
-                    #     line_type = 2
-                    #     cv2.putText(rectifiedL_copy, text_to_draw, text_position, font, font_scale, font_color, line_type)
+                        # # Line type
+                        # line_type = 2
+                        # cv2.putText(rectifiedL_copy, text_to_draw, text_position, font, font_scale, font_color, line_type)
 
                     # cv2.imwrite(output_path, rectifiedL_copy)
-                    # #end of drawing
 
                     vecs=[]
 
@@ -1147,7 +1138,7 @@ def add_frame(local_database, frame, threshold):
                 merge_parts=merge_lists(local_database[i].parts_local, frame.parts_local)
 
                 frame_final=merge(merge_parts, frame.frame_name, local_database[i].frame_name)
-                print('-------------11111111111')
+                
                 print(len(local_database))
                 print('frame_final', frame_final.mean_local, frame_final.range_local)
                 
@@ -1214,11 +1205,11 @@ if __name__ == '__main__':
 
     # # Directory paths, for 'video'
 
-    # left='./same_3persons/person1front_nojacket/left/'
-    # right='./same_3persons/person1front_nojacket/right/'
+    left='./person_test/person3_front/left/'
+    right='./person_test/person3_front/right/'
 
-    left='./same_3persons/full/left/'
-    right='./same_3persons/full/right/'
+    # left='./3persons/person2/front_copy/left/'
+    # right='./3persons/person2/front_copy/right/'
     # left='./test/left/'
     # right='./test/right/'
 
@@ -1312,7 +1303,7 @@ if __name__ == '__main__':
 
     valid_frames=[]
 
-    threshold=2.000001e-5
+    threshold=2.000001e-6
 
 
     # print(left_files)
@@ -1372,6 +1363,8 @@ if __name__ == '__main__':
                         this_frame=Frame(mean_frame, range_frame, part_frame, file_name)
 
                         valid_frames.append(this_frame)
+
+        # assert 0 ==1
 
 
 
