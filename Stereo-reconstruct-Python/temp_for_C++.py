@@ -393,7 +393,7 @@ class StereoDepth(object):
         if not show_depth:
         # #code for single point
             
-
+            
 
             #calculate the disparity for onetime
             grayL = cv2.cvtColor(rectifiedL, cv2.COLOR_BGR2GRAY)
@@ -406,7 +406,7 @@ class StereoDepth(object):
 
             x, y, depth = cv2.split(points_3d) 
             xyz_coord = points_3d  # depth = points_3d[:, :, 2]
-
+            
             depth_colormap = stereo_matcher.get_visual_depth(depth)
             dispL_colormap = stereo_matcher.get_visual_disparity(dispL)
 
@@ -489,24 +489,31 @@ class StereoDepth(object):
 
                 depth_3d=[]
 
-                for rectified_left_points_result in rectified_left_points_results:
-                    tempx=rectified_left_points_result[6][0][0]
-                    tempy=rectified_left_points_result[6][0][1]
+                print(rectified_left_points_results)
 
-                    points3d=xyz_coord[round(tempx)][round(tempy)]
-                    depth_3d.append(points3d[2])
+                for rectified_left_points_result in rectified_left_points_results:
+                    for k in range(17):
+                        tempx=rectified_left_points_result[k][0][0]
+                        tempy=rectified_left_points_result[k][0][1]
+
+                        points3d=xyz_coord[round(tempx)][round(tempy)]
+                        depth_3d.append(points3d[2])
 
                 # print(depth_3d)
-                result_depth=median(depth_3d)
+                result_depth=(depth_3d)
                 # print(result_depth)
                 # points3d=xyz_coord[round(tempx)][round(tempy)]
                 # # points3d=xyz_coord[round(rectified_left_points_results[0][5][0][0])][round(rectified_left_points_results[0][5][0][1])]
                 # # print(tempx, tempy)
                 # # print(points3d)
                 # print(points3d[0], points3d[1], points3d[2])
-                
-                # print('111111111111111111', conf_sums_local[0]>max_min)
+
+                print(result_depth)
+                print('111111111111111111', result_depth<effective_range)
+                print('111111111111111111', conf_sums_local[0]>max_min)
                 if result_depth<effective_range and conf_sums_local[0]>max_min:
+
+                    
                 
                     if get_average:
                         # print('----',rectified_left_points_results)
@@ -517,7 +524,7 @@ class StereoDepth(object):
                     # rectifiedL_copy = rectifiedL.copy()
 
 
-
+                    
 
                     
                     for rectified_left_points_result in rectified_left_points_results:
@@ -552,7 +559,7 @@ class StereoDepth(object):
 
 
 
-
+                    
                     for rectified_left_points_result in rectified_left_points_results:
                         points3d=[]
 
@@ -565,6 +572,8 @@ class StereoDepth(object):
 
                             points3d.append(point3d)
                         #end for 17points of each person
+
+                        print(points3d)
 
                         vec_inds = [[6, 5], [6, 8], [8, 10], [5, 7], [7, 9], [12, 14], [14, 16], [11, 13], [13, 15],[6,12],[5,11],[12,11]]
             
@@ -1207,10 +1216,10 @@ if __name__ == '__main__':
     # left='./same_3persons/person1front_nojacket/left/'
     # right='./same_3persons/person1front_nojacket/right/'
 
-    left='./same_3persons/full/left/'
-    right='./same_3persons/full/right/'
-    # left='./test/left/'
-    # right='./test/right/'
+    # left='./same_3persons/full/left/'
+    # right='./same_3persons/full/right/'
+    left='./test/left/'
+    right='./test/right/'
 
     # # #for same_person
     left_dir=left
@@ -1239,7 +1248,7 @@ if __name__ == '__main__':
     converge_threshold=5
     
     #how many augmentation you wanna do
-    num_aug=8
+    num_aug=1
     
     #save top match file or not
     save_top_file=False
@@ -1317,7 +1326,7 @@ if __name__ == '__main__':
             
             left_file_path = os.path.join(left_dir, file_name)
             right_file_path = os.path.join(right_dir, right_file_name)
-
+            
             # Print out the paths to check if they are correct
             # print(f"Checking pair: Left - {left_file_path} | Right - {right_file_path}")
 
@@ -1362,134 +1371,6 @@ if __name__ == '__main__':
                         this_frame=Frame(mean_frame, range_frame, part_frame, file_name)
 
                         valid_frames.append(this_frame)
-
-
-
-    #post processing algorithm
-
-    
-    #end of outer for loop
-
-
-    print('left_name is: ', left_names)
-
-    print(len(valid_frames))
-
-
-    if len(valid_frames)<3:
-        print('no enough valid frames')
-    else:
-        ajacent_result=[]
-        for i in range(len(valid_frames)-1):
-            ajacent_result.append(intersect(valid_frames[i].mean_local, valid_frames[i+1].mean_local,valid_frames[i].range_local, valid_frames[i+1].range_local, distri, map_probs)[0])
-
-        print(ajacent_result)
-        indices_sorted = sorted(range(len(ajacent_result)), key=lambda i: ajacent_result[i], reverse=True)
-
-        pair_index=[]
-        for i in indices_sorted:
-            pair_index.append([i,i+1])
-
-        print(pair_index)
-
-
-
-    local_database=[]
-
-
-    #start to do the filtering here
-
-    for i in pair_index:
-        first_merged=None
-        print('----------print the two means and ranges: ')
-        print(valid_frames[i[0]].mean_local, valid_frames[i[0]].range_local)
-        print(valid_frames[i[1]].mean_local, valid_frames[i[1]].range_local)
-        print(intersect(valid_frames[i[0]].mean_local, valid_frames[i[1]].mean_local,valid_frames[i[0]].range_local, valid_frames[i[1]].range_local, distri, map_probs)[0])
-        if intersect(valid_frames[i[0]].mean_local, valid_frames[i[1]].mean_local,valid_frames[i[0]].range_local, valid_frames[i[1]].range_local, distri, map_probs)[0]>threshold:
-            print('matured at this frame: ', left_names[i[0]], left_names[i[1]])
-            #first_merged is a frame object
-            first_merged=merge(merge_lists(valid_frames[i[0]].parts_local, valid_frames[i[1]].parts_local), valid_frames[i[0]].frame_name, valid_frames[i[1]].frame_name)
-            left_merged=first_merged
-            right_merged=first_merged
-
-            keep_merging=True
-
-            count=0
-
-
-            for k in range(1, boundary_threshold+1):
-
-                if(i[0]-k)>0:
-              
-                    if(intersect(first_merged.mean_local, valid_frames[i[0]-k].mean_local,first_merged.range_local, valid_frames[i[0]-k].range_local, distri, map_probs)[0]>threshold):
-                        left_merged=merge(merge_lists(left_merged.parts_local, valid_frames[i[0]-k].parts_local),left_merged.frame_name,valid_frames[i[0]-k].frame_name  )
-                        count+=1
-
-            
-                if(i[1]+k<len(valid_frames)):
-               
-                    if(intersect(first_merged.mean_local, valid_frames[i[1]+k].mean_local,first_merged.range_local, valid_frames[i[1]+k].range_local, distri, map_probs)[0]>threshold):
-                        right_merged=merge(merge_lists(right_merged.parts_local, valid_frames[i[1]+k].parts_local), right_merged.frame_name, valid_frames[i[1]+k].frame_name)
-                        count+=1
-
-            print('at this merge, include the two center, totally frames: ',count+2, 'are merged. ')
-            # local_database.append(merge(merge_lists(left_merged.parts_local, right_merged.parts_local)))
-            temp_final=merge(merge_lists(left_merged.parts_local, right_merged.parts_local), left_merged.frame_name, right_merged.frame_name)
-            local_database=add_frame(local_database,temp_final, threshold)
-            
-
-
-
-        else:
-            pass
-
-
-
-
-
-    # print(local_database)
-    print('--------')
-    print('local_database is: ')
-    print(len(local_database))
-    
-    for i in local_database:
-        print('mean is: ', i.mean_local)
-        print('range is: ', i.range_local)
-        print('frame_names: ', i.frame_name)
-        # print('frame is: ', i)
-        print('---')
-
-
-        
-    i = len(local_database) - 1
-    while i >= 0:
-        j = i - 1
-        while j >= 0:
-            if intersect(local_database[i].mean_local, local_database[j].mean_local, local_database[i].range_local, local_database[j].range_local, distri, map_probs)[0] > threshold:
-                del local_database[j]
-                i -= 1  # Decrement i since the list length has decreased
-                if i <= j:  # Adjust j if necessary
-                    j -= 1
-            else:
-                j -= 1  # Decrement j to check with the next element
-        i -= 1  # Move to the previous element in the list
-
-    print('-------------------------------------------------')
-
-    # print(local_database)
-    print('--------')
-    print('local_database is: ')
-    print(len(local_database))
-    
-    for i in local_database:
-        print('mean is: ', i.mean_local)
-        print('range is: ', i.range_local)
-        print('frame_names: ', i.frame_name)
-        # print('frame is: ', i)
-        print('---')
-
-    
-
 
 
 
