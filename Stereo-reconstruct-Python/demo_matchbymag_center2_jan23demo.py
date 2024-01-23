@@ -1,3 +1,4 @@
+#test
 import sys
 import os
 import cv2
@@ -1035,7 +1036,7 @@ class Frame:
         return (self.mean_local == other.mean_local and 
                 self.range_local == other.range_local and 
                 self.parts_local == other.parts_local and
-                self.frame_name==frame_name)
+                self.frame_name==other.frame_name)
 
 
 def remove_duplicates(frames):
