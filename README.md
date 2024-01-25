@@ -9,16 +9,23 @@ opencv_contrib:/home/myd/Desktop/Stereo-reconstruct-C++/tflite/pose_stereovision
 switch opencv4.8.1 to opencv4.7.0
 
 git clone https://github.com/opencv/opencv.git
+
 cd opencv
+
 git checkout 4.8.1
+
 cd ..
 
 git clone https://github.com/opencv/opencv_contrib.git
+
 cd opencv_contrib
+
 git checkout 4.8.1
+
 cd ..
 
 cd opencv
+
 mkdir build && cd build
 
 
