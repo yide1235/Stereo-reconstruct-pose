@@ -35,14 +35,14 @@ mkdir build && cd build
 
 substitue the opencv and opencv-contrib
 
+delete cmake cache and cmae files
 
-cmake -D CMAKE_BUILD_TYPE=RELEASE \
-      -D CMAKE_INSTALL_PREFIX=/usr/local \
-      -D OPENCV_EXTRA_MODULES_PATH=../../opencv_contrib/modules \
-      -D WITH_CUDA=OFF \
-      -D BUILD_TESTS=OFF \
-      -D INSTALL_PYTHON_EXAMPLES=OFF \
-      -D BUILD_EXAMPLES=OFF ..
+then
+
+
+cmake -D CMAKE_BUILD_TYPE=RELEASE       -D CMAKE_INSTALL_PREFIX=/usr/local       -D OPENCV_EXTRA_MODULES_PATH=../../opencv_contrib/modules       -D WITH_CUDA=OFF       -D BUILD_TESTS=OFF       -D INSTALL_PYTHON_EXAMPLES=OFF       -D BUILD_EXAMPLES=OFF ..
+
+
 
 make -j$(nproc)
 
