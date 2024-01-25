@@ -34,6 +34,8 @@ mkdir build && cd build
 
 
 substitue the opencv and opencv-contrib
+
+
 cmake -D CMAKE_BUILD_TYPE=RELEASE \
       -D CMAKE_INSTALL_PREFIX=/usr/local \
       -D OPENCV_EXTRA_MODULES_PATH=../../opencv_contrib/modules \
