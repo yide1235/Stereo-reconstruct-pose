@@ -1,3 +1,5 @@
+## export LD_LIBRARY_PATH=/content/conda-env/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+
 # for C++ version,
 current only works with opencv4.8.1 now
 so need to compile opencv 4.8.1 at this two:
@@ -7,6 +9,7 @@ opencv_contrib:/home/myd/Desktop/Stereo-reconstruct-C++/tflite/pose_stereovision
 
 
 switch opencv4.8.1 to opencv4.7.0
+
 
 git clone https://github.com/opencv/opencv.git
 
