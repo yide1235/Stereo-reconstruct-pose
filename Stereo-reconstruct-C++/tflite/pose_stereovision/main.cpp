@@ -13,8 +13,14 @@
 #include <map>
 #include <string>
 #include <random>
-
 #include <filesystem> 
+#include <iostream>
+#include <algorithm>
+#include <numeric>
+#include <regex>
+
+
+
 
 using namespace std;
 using namespace cv;
@@ -25,6 +31,137 @@ using TfLiteDelegatePtr = tflite::Interpreter::TfLiteDelegatePtr;
 using TfLiteDelegatePtrMap = std::map<std::string, TfLiteDelegatePtr>;
 
 typedef cv::Point3_<float> Pixel;
+
+
+
+//***************************
+//function for intersection function
+//already have validated
+
+double phi(double z) {
+    return (1.0 + std::erf(z / std::sqrt(2.0))) / 2.0;
+}
+
+double point_match(double dist1_mu, double dist1_sig, double val) {
+    double z = std::abs((val - dist1_mu) / dist1_sig);
+    double cum_prob = phi(z);
+    return 1 - cum_prob;
+}
+
+double dist_intersect(double dist1_mu, double dist1_sig, double dist2_mu, double dist2_sig) {
+    double step_sig = std::max(dist1_sig, dist2_sig);
+    double step = 6 * step_sig / 10;
+    double startx = std::min(dist1_mu, dist2_mu) - 6 * step_sig;
+    double endx = std::max(dist1_mu, dist2_mu) + 6 * step_sig;
+    double int_prob = 0;
+
+    for (double currx = startx; currx < endx; currx += step) {
+        double refz1 = (currx - dist1_mu) / dist1_sig;
+        double refz2 = ((currx + step) - dist1_mu) / dist1_sig;
+        double p1 = phi(refz1);
+        double p2 = phi(refz2);
+        double prob1 = std::abs(p2 - p1);
+
+        refz1 = (currx - dist2_mu) / dist2_sig;
+        refz2 = ((currx + step) - dist2_mu) / dist2_sig;
+        p1 = phi(refz1);
+        p2 = phi(refz2);
+        double prob2 = std::abs(p2 - p1);
+
+        int_prob += std::min(prob1, prob2);
+    }
+
+    return int_prob;
+}
+
+double est_sig(double rng, double prob, const std::map<double, double>& map_probs) {
+    prob = std::round(prob * 100) / 100;
+    auto it = map_probs.find(prob);
+    if (it != map_probs.end()) {
+        return 0.5 * rng / it->second;
+    }
+    return (prob <= 0 || prob > 1) ? -1 : -1;
+}
+
+std::map<double, double> gen_dict() {
+    std::map<double, double> map_probs;
+    for (int x = 1; x < 350; ++x) {
+        double prob = std::round((phi(x / 100.0) - phi(-x / 100.0)) * 100) / 100;
+        if (map_probs.find(prob) == map_probs.end()) {
+            map_probs[prob] = x / 100.0;
+        }
+    }
+    return map_probs;
+}
+
+std::pair<double, std::vector<double>> intersect(const std::vector<double>& means1, const std::vector<double>& means2, const std::vector<double>& range1, const std::vector<double>& range2, double prob, const std::map<double, double>& map_probs) {
+    double mult = 1;
+    std::vector<double> probs;
+    double tot = 0;
+    int cnt = 0, nan_cnt = 0;
+
+    for (size_t i = 0; i < means1.size(); ++i) {
+        double sig1 = est_sig(range1[i], prob, map_probs);
+        double sig2 = est_sig(range2[i], prob, map_probs);
+        if (sig1 == -1 || sig2 == -1) {
+            probs.push_back(std::nan(""));
+            nan_cnt++;
+            continue;
+        }
+
+        double int_prob = dist_intersect(means1[i], sig1, means2[i], sig2);
+        if (int_prob == 0) {
+            probs.push_back(std::nan(""));
+            nan_cnt++;
+            continue;
+        }
+
+        mult *= int_prob;
+        tot += int_prob;
+        cnt++;
+        probs.push_back(int_prob);
+    }
+
+    double avg_prob = cnt > 0 ? tot / cnt : 0;
+    if (nan_cnt > 0) {
+        mult *= std::pow(10, -nan_cnt);
+    }
+
+    return {mult, probs};
+}
+
+
+
+
+// int main() {
+//     double ret_val = dist_intersect(1, 1, 6, 1);
+//     std::cout << "dist_intersect: " << ret_val << std::endl;
+
+//     std::map<double, double> map_probs = gen_dict();
+
+//     double distri = 0.677;
+//     std::vector<double> mean1 = {32.51783905029297, 22.714483642578124, 18.473861694335938, 23.965794372558594, 20.531011962890624, 36.12490539550781, 35.75204772949219, 34.6367431640625, 32.66388854980469, 48.96383972167969, 50.294253540039065, 20.608946228027342};
+//     std::vector<double> range1 = {1.5, 0.7120620727539055, 1.5, 0.5262313842773452, 0.833995056152343, 1.004507446289061, 0.8336090087890611, 1.1875183105468778, 1.5, 1.3794799804687514, 1.5, 0.5};
+
+//     std::vector<double> mean2 = {31.859530639648437, 24.62757110595703, 20.4177490234375, 22.398268127441405, 22.508877563476563, 36.436947631835935, 36.81101684570312, 37.32706909179687, 35.57789001464844, 45.0595718383789, 47.786416625976564, 19.50404052734375};
+//     std::vector<double> range2 = {0.5, 0.8721343994140653, 1.0946456909179716, 1.4546157836914055, 1.5, 0.5, 0.9813110351562528, 0.9918975830078125, 1.5, 1.5, 0.7932556152343722, 0.7743011474609389};
+
+//     auto [mult, probs] = intersect(mean1, mean2, range1, range2, distri, map_probs);
+//     std::cout << "intersect: " << mult << std::endl;
+//     for (double prob : probs) {
+//         std::cout << prob << " ";
+//     }
+//     std::cout << std::endl;
+
+//     return 0;
+// }
+
+
+//end of intersetction function
+//*****************************
+
+
+
 
 
 
@@ -324,7 +461,7 @@ void expandBoundingBoxes(std::vector<std::vector<float>>& boxes, int img_width, 
 
     for (auto& box : boxes) {
 
-        std::cout << box[0] << " " << box[1] <<" " <<  box[2] <<" " <<  box[3] <<" " <<  std::endl;
+        // std::cout << box[0] << " " << box[1] <<" " <<  box[2] <<" " <<  box[3] <<" " <<  std::endl;
 
         float x1 = box[0], y1 = box[1], x2 = box[2], y2 = box[3];
 
@@ -355,105 +492,106 @@ std::vector<std::vector<float>> process_4(const std::unique_ptr<tflite::Interpre
 {
 
 
-  //setupInput(interpreter);
+    //setupInput(interpreter);
 
-  // cout << " Got model " << endl;
-  // get input & output layer
-  TfLiteTensor *input_tensor = interpreter->tensor(interpreter->inputs()[0]);
-  // cout << " Got input " << endl;
-  TfLiteTensor *output_box = interpreter->tensor(interpreter->outputs()[0]);
-  // cout << " Got output " << endl;
-  // TfLiteTensor *output_score = interpreter->tensor(interpreter->outputs()[1]);
-  // cout << " Got output score " << endl;
+    // cout << " Got model " << endl;
+    // get input & output layer
+    TfLiteTensor *input_tensor = interpreter->tensor(interpreter->inputs()[0]);
+    // cout << " Got input " << endl;
+    TfLiteTensor *output_box = interpreter->tensor(interpreter->outputs()[0]);
+    // cout << " Got output " << endl;
+    // TfLiteTensor *output_score = interpreter->tensor(interpreter->outputs()[1]);
+    // cout << " Got output score " << endl;
 
-  const uint HEIGHT = input_tensor->dims->data[1];
-  const uint WIDTH = input_tensor->dims->data[2];
-  const uint CHANNEL = input_tensor->dims->data[3];
-  // cout << "H " << HEIGHT << " W " << WIDTH << " C " << CHANNEL << endl;
+    const uint HEIGHT = input_tensor->dims->data[1];
+    const uint WIDTH = input_tensor->dims->data[2];
+    const uint CHANNEL = input_tensor->dims->data[3];
+    // cout << "H " << HEIGHT << " W " << WIDTH << " C " << CHANNEL << endl;
 
-  // read image file
-  std::chrono::time_point<std::chrono::system_clock> beg, start, end, done, nmsdone;
-  std::chrono::duration<double> elapsed_seconds;
-  start = std::chrono::system_clock::now();
-
-
-
-  const float width=img.rows;
-  const float height=img.cols;
-  // std::cout << width << height <<std::endl;
-  //width is 1080, height is 1920
-
-  end = std::chrono::system_clock::now();
-  elapsed_seconds = end - start;
-  printf("Read matrix from file s: %.10f\n", elapsed_seconds.count());
-
-  start = std::chrono::system_clock::now();
-
- 
-  cv::Mat inputImg = letterbox(img, WIDTH, HEIGHT);
+    // read image file
+    std::chrono::time_point<std::chrono::system_clock> beg, start, end, done, nmsdone;
+    std::chrono::duration<double> elapsed_seconds;
+    start = std::chrono::system_clock::now();
 
 
 
-  inputImg = mat_process(inputImg, WIDTH, HEIGHT);
+    const float width=img.rows;
+    const float height=img.cols;
+    // std::cout << width << height <<std::endl;
+    //width is 1080, height is 1920
 
 
- 
+    end = std::chrono::system_clock::now();
+    elapsed_seconds = end - start;
+    // printf("Read matrix from file s: %.10f\n", elapsed_seconds.count());
 
-  // cout << "DIM IS " << inputImg.channels() << endl;
-
-
-  // cout << " Got image " << endl;
-
-  end = std::chrono::system_clock::now();
-  elapsed_seconds = end - start;
-  printf("Process Matrix to RGB s: %.10f\n", elapsed_seconds.count());
-  interpreter->SetAllowFp16PrecisionForFp32(true);
-
-  start = std::chrono::system_clock::now();
-  // cout << " GOT INPUT IMAGE " << endl;
-  
-  // flatten rgb image to input layer.
-  // float* input_data = interpreter->typed_input_tensor<float>(0);
-  memcpy(input_tensor->data.f, inputImg.ptr<float>(0), HEIGHT*WIDTH*3* sizeof(float));
+    start = std::chrono::system_clock::now();
 
 
-  interpreter->Invoke();
-  end = std::chrono::system_clock::now();
-  elapsed_seconds = end - start;
-  printf("invoke interpreter s: %.10f\n", elapsed_seconds.count());
-
-  float *box_vec = interpreter->typed_output_tensor<float>(0);
+    cv::Mat inputImg = letterbox(img, WIDTH, HEIGHT);
 
 
-  int nelem = 1;
-  int dim1 = output_box->dims->data[2]; // should be 8400
-  int dim2 = output_box->dims->data[1]; // should be 84
-  for (int i = 0; i < output_box->dims->size; ++i)
-  {
+
+    inputImg = mat_process(inputImg, WIDTH, HEIGHT);
+
+
+
+
+    // cout << "DIM IS " << inputImg.channels() << endl;
+
+
+    // cout << " Got image " << endl;
+
+    end = std::chrono::system_clock::now();
+    elapsed_seconds = end - start;
+    // printf("Process Matrix to RGB s: %.10f\n", elapsed_seconds.count());
+    interpreter->SetAllowFp16PrecisionForFp32(true);
+
+    start = std::chrono::system_clock::now();
+    // cout << " GOT INPUT IMAGE " << endl;
+
+    // flatten rgb image to input layer.
+    // float* input_data = interpreter->typed_input_tensor<float>(0);
+    memcpy(input_tensor->data.f, inputImg.ptr<float>(0), HEIGHT*WIDTH*3* sizeof(float));
+
+
+    interpreter->Invoke();
+    end = std::chrono::system_clock::now();
+    elapsed_seconds = end - start;
+    // printf("invoke interpreter s: %.10f\n", elapsed_seconds.count());
+
+    float *box_vec = interpreter->typed_output_tensor<float>(0);
+
+
+    int nelem = 1;
+    int dim1 = output_box->dims->data[2]; // should be 8400
+    int dim2 = output_box->dims->data[1]; // should be 84
+    for (int i = 0; i < output_box->dims->size; ++i)
+    {
     // cout << "DIM IS " << output_box->dims->data[i] << endl;
     nelem *= output_box->dims->data[i];
-  }
+    }
 
-  //implemented a faster way in C++
+    //implemented a faster way in C++
 
-  //use this
-  std::vector<float> confidence;
-  std::vector<float> index;
-  std::vector<std::vector<float>> bbox;
-
-
-
-  int base = 4 * 8400;
-  int m = 0;
+    //use this
+    std::vector<float> confidence;
+    std::vector<float> index;
+    std::vector<std::vector<float>> bbox;
 
 
-  while (m < 8400) {
+
+    int base = 4 * 8400;
+    int m = 0;
+
+
+    while (m < 8400) {
     std::vector<float> temp;
     int n = 0;
 
 
     while (n < 80) {
-      if (box_vec[n * 8400 + m + base] >= detection_threshold) {
+        if (box_vec[n * 8400 + m + base] >= detection_threshold) {
         index.push_back(n);
         confidence.push_back(box_vec[n * 8400 + m + base]);
 
@@ -461,89 +599,89 @@ std::vector<std::vector<float>> process_4(const std::unique_ptr<tflite::Interpre
         std::vector<float> temp2;
         int i = 0;
         while (i < 4) {
-          temp2.push_back(box_vec[i * 8400 + m]);
-          i++;
+            temp2.push_back(box_vec[i * 8400 + m]);
+            i++;
         }
 
 
         // bbox.push_back(xywh2xyxy_scale(temp2,640,640));
         bbox.push_back(temp2);
-      }
-      n++;
+        }
+        n++;
     }
     m++;
-  }
+    }
 
 
 
-  for(int q=0;q<bbox.size();q++){
-      bbox[q]=xywh2xyxy_scale(bbox[q],640,640);
+    for(int q=0;q<bbox.size();q++){
+        bbox[q]=xywh2xyxy_scale(bbox[q],640,640);
 
-  }
+    }
 
-  std::vector<std::vector<int>> ind;
-  for(int i=0;i< 80;i++){
+    std::vector<std::vector<int>> ind;
+    for(int i=0;i< 80;i++){
     std::vector<int> temp4;
     for(int j=0;j<index.size();j++){
-      if(i==index[j]){
+        if(i==index[j]){
         // std::cout <<index[j] <<std::endl;
         temp4.push_back(j);
-      }
+        }
     }
 
     if(temp4.empty()){
-      temp4.push_back(8401);
+        temp4.push_back(8401);
     }
     ind.push_back(temp4);
     // std::cout << temp4.size() << std::endl;
 
-  }
+    }
 
 
 
-  //here i have ind, confidence, index, bbox
-  std::vector<std::vector<float>> results;
+    //here i have ind, confidence, index, bbox
+    std::vector<std::vector<float>> results;
 
-  int confidence_length=confidence.size();
-  int class_length=index.size();
-  assert(confidence_length == class_length);
+    int confidence_length=confidence.size();
+    int class_length=index.size();
+    assert(confidence_length == class_length);
 
-  assert(confidence_length == bbox.size());
+    assert(confidence_length == bbox.size());
 
-  std::vector<std::vector<float>> temp_results;
+    std::vector<std::vector<float>> temp_results;
 
-  for (int i=0; i< 80; i++){
+    for (int i=0; i< 80; i++){
 
-      std::vector<std::vector<float>>box_selected;
+        std::vector<std::vector<float>>box_selected;
 
 
-      std::vector<std::vector<float>> box_afternms;
-      // std::vector<float> confidence_selected;
-      
-      if (ind[i][0]!=8401){
+        std::vector<std::vector<float>> box_afternms;
+        // std::vector<float> confidence_selected;
+        
+        if (ind[i][0]!=8401){
         for(int j=0;j<ind[i].size();j++){
-          box_selected.push_back(bbox[ind[i][j]]);
-          
+            box_selected.push_back(bbox[ind[i][j]]);
+            
         }
 
 
 
         std::vector<int> indices=NMS(box_selected, 0.45);
         if(indices.size()>0){
-          for(int s=0;s<indices.size();s++){
+            for(int s=0;s<indices.size();s++){
             box_afternms.push_back(bbox[ind[i][indices[s]]]);
-          }
+            }
         }
 
         for(int d=0;d<box_afternms.size();d++){
-          box_afternms[d]=scaleBox(box_afternms[d], HEIGHT, WIDTH, static_cast<int>(width), static_cast<int>(height) );
+            box_afternms[d]=scaleBox(box_afternms[d], HEIGHT, WIDTH, static_cast<int>(width), static_cast<int>(height) );
         }
 
         vector<float> confidence_afternms;
         if(indices.size()>0){
-          for(int s=0;s<indices.size();s++){
+            for(int s=0;s<indices.size();s++){
             confidence_afternms.push_back(confidence[ind[i][indices[s]]]);
-          }
+            }
         }
 
         assert(box_afternms.size()==confidence_afternms.size());
@@ -551,28 +689,28 @@ std::vector<std::vector<float>> process_4(const std::unique_ptr<tflite::Interpre
         
         // std::cout << box_afternms.size() << std::endl;
         for(int f=0;f<box_afternms.size();f++){
-          vector<float> temp6;
-          temp6.push_back(box_afternms[f][0]);
-          temp6.push_back(box_afternms[f][1]);
-          temp6.push_back(box_afternms[f][2]);
-          temp6.push_back(box_afternms[f][3]);
-          temp6.push_back(confidence_afternms[f]);
-          temp6.push_back(static_cast<float>(i));
-          temp_results.push_back(temp6);
+            vector<float> temp6;
+            temp6.push_back(box_afternms[f][0]);
+            temp6.push_back(box_afternms[f][1]);
+            temp6.push_back(box_afternms[f][2]);
+            temp6.push_back(box_afternms[f][3]);
+            temp6.push_back(confidence_afternms[f]);
+            temp6.push_back(static_cast<float>(i));
+            temp_results.push_back(temp6);
         }
 
-      }
-      
-  }//end of forloop
+        }
+        
+    }//end of forloop
 
 
-  //aobe is totally correct
+    //aobe is totally correct
 
-  //img is the image
-  int size_threshold=3872;
-  // std::cout << temp_results.size() << std::endl;
-  //compare results in temp_results with threshold
-  for(int i=0; i<temp_results.size();i++){
+    //img is the image
+    int size_threshold=3872;
+    // std::cout << temp_results.size() << std::endl;
+    //compare results in temp_results with threshold
+    for(int i=0; i<temp_results.size();i++){
     std::vector<float> temp7;
     std::vector<int> box7;
     box7.push_back(std::round(temp_results[i][0]));
@@ -582,29 +720,31 @@ std::vector<std::vector<float>> process_4(const std::unique_ptr<tflite::Interpre
     cv::Mat detected=img(cv::Rect(box7[0], box7[1], box7[2] - box7[0], box7[3] - box7[1]));
     // std::cout << detected.rows*detected.cols << std::endl;
     if(detected.rows*detected.cols >= size_threshold){
-      temp7.push_back(temp_results[i][0]);
-      temp7.push_back(temp_results[i][1]);
-      temp7.push_back(temp_results[i][2]);
-      temp7.push_back(temp_results[i][3]);
-      temp7.push_back(temp_results[i][4]);
-      temp7.push_back(temp_results[i][5]);
-      results.push_back(temp7);
+        temp7.push_back(temp_results[i][0]);
+        temp7.push_back(temp_results[i][1]);
+        temp7.push_back(temp_results[i][2]);
+        temp7.push_back(temp_results[i][3]);
+        temp7.push_back(temp_results[i][4]);
+        temp7.push_back(temp_results[i][5]);
+        results.push_back(temp7);
     }
-    
-  }
 
-  // for (const std::vector<float>& row :results) {
-  //   // Iterate through the elements in each row (inner vector)
-  //   for (float element : row) {
-  //       std::cout << element << ' ';
-  //   }
-  //   std::cout << std::endl; // Print a newline after each row
-  // }
+    }
 
-  // the last two digits is percentage of add to width and height
-  expandBoundingBoxes(results,img.cols,img.rows, 0.03, 0.01);
+    // for (const std::vector<float>& row :results) {
+    //   // Iterate through the elements in each row (inner vector)
+    //   for (float element : row) {
+    //       std::cout << element << ' ';
+    //   }
+    //   std::cout << std::endl; // Print a newline after each row
+    // }
 
-  return results;
+    // the last two digits is percentage of add to width and height
+
+
+    expandBoundingBoxes(results,img.cols,img.rows, 0.04, 0.02);
+
+    return results;
 
 }
 
@@ -681,6 +821,20 @@ void plotBboxes(const cv::Mat& img, const std::vector<std::vector<float>>& resul
 }
 
 //end of detection model
+//****************************************************
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -827,7 +981,22 @@ std::vector<Keypoint> process_movenet(const std::unique_ptr<tflite::Interpreter>
 
 
 
-std::vector<Keypoint> process_movenet_augmentation(const std::unique_ptr<tflite::Interpreter>& interpreter, const cv::Mat& img, float movenet_threshold, int loop_threshold) {
+// void printKeypoints(const std::vector<std::vector<Keypoint>>& keypoints) {
+//     for (size_t i = 0; i < keypoints.size(); ++i) {
+//         std::cout << "Vector " << i << ":" << std::endl;
+//         for (size_t j = 0; j < keypoints[i].size(); ++j) {
+//             std::cout << "Keypoint " << j << ": (" << keypoints[i][j].x << ", " << keypoints[i][j].y << ")" << std::endl;
+//         }
+//     }
+// }
+
+
+
+
+
+
+
+std::vector<std::vector<Keypoint>> process_movenet_augmentation(const std::unique_ptr<tflite::Interpreter>& interpreter, const cv::Mat& img, float movenet_threshold, int loop_threshold, bool use_aug=true) {
 
 
     
@@ -848,7 +1017,7 @@ std::vector<Keypoint> process_movenet_augmentation(const std::unique_ptr<tflite:
         std::uniform_int_distribution<> dis_int(0, 0);
 
         // Choose augmentation
-        std::string augmentations[3] = {"stretch","noise",  "crop"};
+        std::string augmentations[3] = {"stretch","noise"};
         std::string augmentation = augmentations[dis_int(gen)];
 
         cv::Mat M = cv::Mat::eye(3, 3, CV_32F);
@@ -858,30 +1027,33 @@ std::vector<Keypoint> process_movenet_augmentation(const std::unique_ptr<tflite:
         int imgr_height = img.rows;
         int imgr_width = img.cols;
 
-        if (augmentation == "noise") {
-            cv::Mat noise = cv::Mat(imgr_height, imgr_width, imgr_temp.type());
-            cv::randu(noise, cv::Scalar::all(0), cv::Scalar::all(50));
-            imgr_temp += noise;
+        if(use_aug){
+          if (augmentation == "noise") {
+              cv::Mat noise = cv::Mat(imgr_height, imgr_width, imgr_temp.type());
+              cv::randu(noise, cv::Scalar::all(0), cv::Scalar::all(50));
+              imgr_temp += noise;
+          }
+
+          else if (augmentation == "stretch") {
+              float fx = dis(gen), fy = dis(gen);
+              cv::resize(imgr_temp, imgr_temp, cv::Size(), fx, fy);
+              M.at<float>(0, 0) = fx;
+              M.at<float>(1, 1) = fy;
+          }       
         }
 
-        else if (augmentation == "stretch") {
-            float fx = dis(gen), fy = dis(gen);
-            cv::resize(imgr_temp, imgr_temp, cv::Size(), fx, fy);
-            M.at<float>(0, 0) = fx;
-            M.at<float>(1, 1) = fy;
-        } 
+        // else if (augmentation == "crop") {
+        //     int x = rand() % (imgr_width / 4);
+        //     int y = rand() % (imgr_height / 4);
+        //     int w = imgr_width - 2 * x;
+        //     int h = imgr_height - 2 * y;
+        //     cv::Rect crop_region(x, y, w, h);
+        //     imgr_temp = imgr_temp(crop_region);
+        //     M.at<float>(0, 2) = -x;
+        //     M.at<float>(1, 2) = -y;
+        // }
 
-        else if (augmentation == "crop") {
-            int x = rand() % (imgr_width / 4);
-            int y = rand() % (imgr_height / 4);
-            int w = imgr_width - 2 * x;
-            int h = imgr_height - 2 * y;
-            cv::Rect crop_region(x, y, w, h);
-            imgr_temp = imgr_temp(crop_region);
-            M.at<float>(0, 2) = -x;
-            M.at<float>(1, 2) = -y;
-        }
-
+        
 
         int width = imgr_temp.cols, height = imgr_temp.rows;
         float scale, x_shift, y_shift;
@@ -902,6 +1074,8 @@ std::vector<Keypoint> process_movenet_augmentation(const std::unique_ptr<tflite:
         cv::Mat img_input;
         resized_img.convertTo(img_input, CV_8UC3);
 
+        // std::cout << "--------------------" << std::endl;
+        //here is correct
         // Get input & output tensor
         TfLiteTensor *input_tensor = interpreter->tensor(interpreter->inputs()[0]);
         TfLiteTensor *output_tensor = interpreter->tensor(interpreter->outputs()[0]);
@@ -909,7 +1083,13 @@ std::vector<Keypoint> process_movenet_augmentation(const std::unique_ptr<tflite:
         const uint HEIGHT = input_tensor->dims->data[1];
         const uint WIDTH = input_tensor->dims->data[2];
         cv::Mat inputImg = img_input; // Assuming img is already preprocessed
-        memcpy(input_tensor->data.f, inputImg.ptr<float>(0), HEIGHT * WIDTH * 3 * sizeof(float));
+
+        // std::cout << "--------------------" << std::endl;
+
+        // memcpy(input_tensor->data.f, inputImg.ptr<float>(0), HEIGHT * WIDTH * 3 * sizeof(float));
+        memcpy(input_tensor->data.uint8, inputImg.ptr<uchar>(0), HEIGHT * WIDTH * 3 * sizeof(uchar));
+
+        // std::cout << "--------------------" << std::endl;
 
         // Run inference
         interpreter->Invoke();
@@ -921,7 +1101,7 @@ std::vector<Keypoint> process_movenet_augmentation(const std::unique_ptr<tflite:
         // cv::imshow("Keypoints", img_input);
         // cv::waitKey(0); // Wait for a key press to close the window
 
-
+        
 
         //movenet outputs 17 keypoints pair
         
@@ -950,11 +1130,11 @@ std::vector<Keypoint> process_movenet_augmentation(const std::unique_ptr<tflite:
         //     cv::Point center(static_cast<int>(point.x), static_cast<int>(point.y));
         //     cv::circle(imgr_temp, center, 1, cv::Scalar(0, 255, 0), -1);
 
-        //     // std::cout << "111111111111Keypoint (x: " << point.x << ", y: " << point.y << ")\n";
+        //     // std::cout << "Keypoint (x: " << point.x << ", y: " << point.y << ")\n";
         // }
         // cv::imshow("Keypoints", imgr_temp);
         // cv::waitKey(0); // Wait for a key press to close the window
-
+        
 
         for (int i = 0; i < points.size(); ++i) {
 
@@ -965,14 +1145,17 @@ std::vector<Keypoint> process_movenet_augmentation(const std::unique_ptr<tflite:
                 float y_adj = point.y;
 
                 // Transform points back according to the inverse of M
-                if (augmentation != "noise") {
-                    cv::Mat inv_M = M.inv();
-                    cv::Vec3f homog_point(x_adj, y_adj, 1);
-                    std::vector<cv::Vec3f> transformed_points;
-                    cv::transform(std::vector<cv::Vec3f>{homog_point}, transformed_points, inv_M);
-                    x_adj = transformed_points[0][0];
-                    y_adj = transformed_points[0][1];
+                if(use_aug){
+                  if (augmentation != "noise") {
+                      cv::Mat inv_M = M.inv();
+                      cv::Vec3f homog_point(x_adj, y_adj, 1);
+                      std::vector<cv::Vec3f> transformed_points;
+                      cv::transform(std::vector<cv::Vec3f>{homog_point}, transformed_points, inv_M);
+                      x_adj = transformed_points[0][0];
+                      y_adj = transformed_points[0][1];
+                  }
                 }
+
                 Keypoint pt = {
                     x_adj,
                     y_adj
@@ -990,7 +1173,244 @@ std::vector<Keypoint> process_movenet_augmentation(const std::unique_ptr<tflite:
         outer_list.push_back(points); 
 
 
-    }//end of 50 loops
+    }//end of loops
+
+
+    // //here is right
+    // // std::cout << "Movenet DONE, " << outer_list.size() << "found\n";
+
+    // // for (const auto& points : outer_list) {
+    // //     for (const auto& point : points) {
+    // //         cv::Point center(static_cast<int>(point.x), static_cast<int>(point.y));
+    // //         cv::circle(img, center, 1, cv::Scalar(0, 255, 0), -1);
+
+    // //         // std::cout << "111111111111Keypoint (x: " << point.x << ", y: " << point.y << ")\n";
+    // //     }
+    // // }
+
+    // // cv::imshow("Keypoints", img);
+    // // cv::waitKey(0); // Wait for a key press to close the window
+
+
+
+
+    // std::vector<std::vector<float>> xlist, ylist;
+
+
+
+
+    // //outer_list is rows 17 cols
+    // for (int i=0;i<output_size;i++){
+    //     std::vector<float> xposition, yposition;
+    //     for(const auto& keypoints : outer_list){
+    //         xposition.push_back(keypoints[i].x);
+    //         yposition.push_back(keypoints[i].y);
+    //     }
+    //     xlist.push_back(xposition);
+    //     ylist.push_back(yposition);
+    // }
+
+
+
+    // // Process each list
+    // auto processList = [](std::vector<std::vector<float>>& list) {
+    //     for (auto& sublist : list) {
+    //         // Remove zeros and sort
+    //         sublist.erase(std::remove(sublist.begin(), sublist.end(), 0.0f), sublist.end());
+    //         std::sort(sublist.begin(), sublist.end());
+
+    //         // Quartile filtering
+    //         size_t n = sublist.size();
+    //         size_t lower_index = static_cast<size_t>(std::ceil(n * 0.25));
+    //         size_t upper_index = static_cast<size_t>(std::floor(n * 0.75));
+    //         sublist = std::vector<float>(sublist.begin() + lower_index, sublist.begin() + upper_index);
+
+    //         // Calculate median
+    //         size_t len = sublist.size();
+    //         if (len >= 2) {
+    //             if (len % 2 == 1) {
+    //                 sublist = {sublist[len / 2]};
+    //             } else {
+    //                 sublist = {(sublist[len / 2 - 1] + sublist[len / 2]) / 2};
+    //             }
+    //         } else if (len == 1) {
+    //             sublist = {sublist[0]};
+    //         } else {
+    //             sublist = {0};
+    //         }
+    //     }
+    // };
+
+    // // Applying processing to both lists
+    // processList(xlist);
+    // processList(ylist);
+
+    // std::vector<Keypoint> result;
+    // // Pairing up the results
+    // assert(xlist.size() == ylist.size());
+    // for (size_t i = 0; i < xlist.size(); ++i) {
+    //     result.push_back(Keypoint{xlist[i].front(), ylist[i].front()});
+    // }
+
+
+
+    // return result;
+
+
+
+    // printKeypoints(outer_list);
+
+
+
+
+    return outer_list;
+
+}
+
+
+
+
+std::vector<Keypoint> process_movenet_onetime(const std::unique_ptr<tflite::Interpreter>& interpreter, const cv::Mat& img, float movenet_threshold, int loop_threshold) {
+
+
+    
+    std::vector<std::vector<Keypoint>> outer_list;
+
+    int output_size = 17; // Assuming 17 keypoints
+
+
+    //default is 50 loops
+    for(int num=0; num<loop_threshold; num++){
+
+        // Process output
+        std::vector<Keypoint> points;
+
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<> dis(0.8, 1.2);
+        std::uniform_int_distribution<> dis_int(0, 0);
+
+        // Choose augmentation
+        std::string augmentations[3] = {"stretch","noise"};
+        std::string augmentation = augmentations[dis_int(gen)];
+
+        cv::Mat M = cv::Mat::eye(3, 3, CV_32F);
+
+        cv::Mat imgr_temp = img.clone();
+
+        int imgr_height = img.rows;
+        int imgr_width = img.cols;
+
+        
+
+        int width = imgr_temp.cols, height = imgr_temp.rows;
+        float scale, x_shift, y_shift;
+
+        if (height > width) {
+            y_shift = 0;
+            scale = static_cast<float>(height) / 256;
+            x_shift = (256 - static_cast<float>(width) / scale) / 2;
+        } else {
+            x_shift = 0;
+            scale = static_cast<float>(width) / 256;
+            y_shift = (256 - static_cast<float>(height) / scale) / 2;
+        }
+
+        cv::Mat resized_img;
+        resized_img = ResizeWithPad(imgr_temp, 256, 256);
+
+        cv::Mat img_input;
+        resized_img.convertTo(img_input, CV_8UC3);
+
+        // std::cout << "--------------------" << std::endl;
+        //here is correct
+        // Get input & output tensor
+        TfLiteTensor *input_tensor = interpreter->tensor(interpreter->inputs()[0]);
+        TfLiteTensor *output_tensor = interpreter->tensor(interpreter->outputs()[0]);
+
+        const uint HEIGHT = input_tensor->dims->data[1];
+        const uint WIDTH = input_tensor->dims->data[2];
+        cv::Mat inputImg = img_input; // Assuming img is already preprocessed
+
+        // std::cout << "--------------------" << std::endl;
+
+        // memcpy(input_tensor->data.f, inputImg.ptr<float>(0), HEIGHT * WIDTH * 3 * sizeof(float));
+        memcpy(input_tensor->data.uint8, inputImg.ptr<uchar>(0), HEIGHT * WIDTH * 3 * sizeof(uchar));
+
+        // std::cout << "--------------------" << std::endl;
+
+        // Run inference
+        interpreter->Invoke();
+
+        // Retrieve output
+        float* output_data = output_tensor->data.f;
+        // float *output_data = interpreter->typed_output_tensor<float>(0);
+        
+        // cv::imshow("Keypoints", img_input);
+        // cv::waitKey(0); // Wait for a key press to close the window
+
+        
+
+        //movenet outputs 17 keypoints pair
+        
+
+        for (int i = 0; i < output_size; ++i) {
+            float y = output_data[i * 3];
+            float x = output_data[i * 3 + 1];
+            float confidence = output_data[i * 3 + 2];
+
+            if (confidence > movenet_threshold) {
+                Keypoint pt = {
+                    ((-x_shift + (x * 256)) * scale),
+                    ((-y_shift + (y * 256)) * scale)
+                };
+                points.push_back(pt);
+
+                // Draw the keypoint on the original image
+                // cv::circle(img, cv::Point(pt.x, pt.y), 1, cv::Scalar(0, 255, 0), -1);
+            } else {
+                points.push_back(Keypoint{0, 0});
+            }
+        }
+
+
+        // for (const auto& point : points) {
+        //     cv::Point center(static_cast<int>(point.x), static_cast<int>(point.y));
+        //     cv::circle(imgr_temp, center, 1, cv::Scalar(0, 255, 0), -1);
+
+        //     // std::cout << "Keypoint (x: " << point.x << ", y: " << point.y << ")\n";
+        // }
+        // cv::imshow("Keypoints", imgr_temp);
+        // cv::waitKey(0); // Wait for a key press to close the window
+        
+
+        for (int i = 0; i < points.size(); ++i) {
+
+            auto& point = points[i];  // Get a reference to the point to modify it directly
+
+            if(point.x != 0 && point.y != 0) {
+                float x_adj = point.x;
+                float y_adj = point.y;
+
+
+                Keypoint pt = {
+                    x_adj,
+                    y_adj
+                };
+                point = pt;  // No need for static_cast
+
+            } 
+
+            else {
+
+                point = Keypoint{0, 0};
+
+            }
+        }
+        outer_list.push_back(points); 
+
+
+    }//end of loops
 
 
     //here is right
@@ -1016,7 +1436,7 @@ std::vector<Keypoint> process_movenet_augmentation(const std::unique_ptr<tflite:
 
 
 
-    //outer_list is 50 rows 17 cols
+    //outer_list is rows 17 cols
     for (int i=0;i<output_size;i++){
         std::vector<float> xposition, yposition;
         for(const auto& keypoints : outer_list){
@@ -1069,11 +1489,43 @@ std::vector<Keypoint> process_movenet_augmentation(const std::unique_ptr<tflite:
         result.push_back(Keypoint{xlist[i].front(), ylist[i].front()});
     }
 
+
+
     return result;
 
 }
 
+
+
+void drawLinesBetweenPoints(cv::Mat& image, const std::vector<Keypoint>& keypoints, const std::vector<std::vector<int>>& vec_inds) {
+    for (const auto& inds : vec_inds) {
+        if (inds.size() == 2 && inds[0] < keypoints.size() && inds[1] < keypoints.size()) {
+            cv::Point pt1(static_cast<int>(keypoints[inds[0]].x), static_cast<int>(keypoints[inds[0]].y));
+            cv::Point pt2(static_cast<int>(keypoints[inds[1]].x), static_cast<int>(keypoints[inds[1]].y));
+            cv::line(image, pt1, pt2, cv::Scalar(200, 200, 255), 2); // Lighter red color in BGR format
+        }
+    }
+}
+
+
+
 //end of movenet
+//**********************************
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1087,13 +1539,21 @@ bool load_stereo_coefficients(const std::string &filename, cv::Mat &K1, cv::Mat 
     }
 
     fs["K1"] >> K1;
+    K1.convertTo(K1, CV_64F); // Ensure matrix is of type double
     fs["D1"] >> D1;
+    D1.convertTo(D1, CV_64F); // Ensure matrix is of type double
     fs["K2"] >> K2;
+    K2.convertTo(K2, CV_64F); // Ensure matrix is of type double
     fs["D2"] >> D2;
+    D2.convertTo(D2, CV_64F); // Ensure matrix is of type double
     fs["R"] >> R;
+    R.convertTo(R, CV_64F); // Ensure matrix is of type double
     fs["T"] >> T;
+    T.convertTo(T, CV_64F); // Ensure matrix is of type double
     fs["E"] >> E;
+    E.convertTo(E, CV_64F); // Ensure matrix is of type double
     fs["F"] >> F;
+    F.convertTo(F, CV_64F); // Ensure matrix is of type double
 
     cv::Mat sizeMat;
     fs["size"] >> sizeMat;
@@ -1102,6 +1562,7 @@ bool load_stereo_coefficients(const std::string &filename, cv::Mat &K1, cv::Mat 
     fs.release();
     return true;
 }
+
 
 std::map<std::string, cv::Mat> get_stereo_coefficients(const std::string &stereo_file, bool rectify = true) {
     cv::Mat K1, D1, K2, D2, R, T, E, F, R1, R2, P1, P2, Q;
@@ -1123,12 +1584,38 @@ std::map<std::string, cv::Mat> get_stereo_coefficients(const std::string &stereo
     config["F"] = F;
     config["size"] = cv::Mat(1, 2, CV_32SC1, cv::Scalar(size.width, size.height));
 
+
+
+
+
     if (rectify) {
         cv::Mat left_map_x, left_map_y, right_map_x, right_map_y;
+
+
+        //***********have to use opencv4.8.1 for now, opencv4.5 gives different results!!!!!!!!!!
         cv::stereoRectify(K1, D1, K2, D2, size, R, T, R1, R2, P1, P2, Q, cv::CALIB_ZERO_DISPARITY, 0.9);
 
+        // for (int i = 0; i < R1.rows; ++i) {
+        //     for (int j = 0; j < R1.cols; ++j) {
+        //         // Adjust the type based on the actual data type of dispL
+        //         std::cout <<R1.at<double>(i, j) << " ";
+        //     }
+        //     std::cout << std::endl;
+        // }
+
+        // for (int i = 0; i < P1.rows; ++i) {
+        //     for (int j = 0; j < P1.cols; ++j) {
+        //         // Adjust the type based on the actual data type of dispL
+        //         std::cout <<P1.at<double>(i, j) << " ";
+        //     }
+        //     std::cout << std::endl;
+        // }
+
+        //***********have to use opencv4.8.1 for now, opencv4.5 gives different results!!!!!!!!!!
         cv::initUndistortRectifyMap(K1, D1, R1, P1, size, CV_32FC1, left_map_x, left_map_y);
         cv::initUndistortRectifyMap(K2, D2, R2, P2, size, CV_32FC1, right_map_x, right_map_y);
+
+        // std::cout << left_map_x.at<float>(499, 500) << " ";
 
         config["R1"] = R1;
         config["R2"] = R2;
@@ -1140,77 +1627,36 @@ std::map<std::string, cv::Mat> get_stereo_coefficients(const std::string &stereo
         config["right_map_x"] = right_map_x;
         config["right_map_y"] = right_map_y;
     }
-    Q.at<double>(2, 3)=922.8335512009055;
+    // Q.at<double>(2, 3)=922.8335512009055; //opencv 4.5 and opencv 4.6 gives different valuer for focal length
     double focal_length = Q.at<double>(2, 3);
     
     double baseline = 1.0 / Q.at<double>(3, 2);
-    std::cout << "Q=\n" << Q << "\nfocal_length=" << focal_length << std::endl;
-    std::cout << "T=\n" << T << "\nbaseline    =" << baseline << "mm" << std::endl;
+    // std::cout << "Q=\n" << Q << "\nfocal_length=" << focal_length << std::endl;
+    // std::cout << "T=\n" << T << "\nbaseline    =" << baseline << "mm" << std::endl;
 
     return config;
 }
 
-// Function to convert disparity map to 3D points
-cv::Mat get_3dpoints(const cv::Mat &disparity, const cv::Mat &Q, float scale = 1.0f) {
-    cv::Mat points_3d;
-    cv::reprojectImageTo3D(disparity, points_3d, Q);
-    points_3d = points_3d * scale;
-    return points_3d;
-}
 
-// // Function to compute disparity map from left and right images
-// cv::Mat get_disparity(const cv::Mat &imgL, const cv::Mat &imgR) {
-//     // Placeholder for disparity calculation. Replace with your actual stereo matching algorithm.
-//     // For example, you might use cv::StereoBM or cv::StereoSGBM
-//     cv::Ptr<cv::StereoBM> stereo = cv::StereoBM::create(16, 9);
-//     cv::Mat dispL;
-//     stereo->compute(imgL, imgR, dispL);
-//     return dispL;
-// }
-cv::Mat get_disparity(const cv::Mat &imgL, const cv::Mat &imgR, bool use_wls = true) {
-    // StereoSGBM parameters
-    int minDisparity = 0;
-    int numDisparities = 5 * 16; // Must be divisible by 16
-    int blockSize = 3;
-    int P1 = 8 * 3 * blockSize * blockSize;
-    int P2 = 32 * 3 * blockSize * blockSize;
-    int disp12MaxDiff = 12;
-    int uniquenessRatio = 10;
-    int speckleWindowSize = 50;
-    int speckleRange = 32;
-    int preFilterCap = 63;
-    int mode = cv::StereoSGBM::MODE_SGBM_3WAY;
+cv::Mat get_3dpoints(const cv::Mat& disparity, const cv::Mat& Q, float scale = 1.0f) {
+    cv::Mat points3D;
 
-    // Create StereoSGBM object
-    cv::Ptr<cv::StereoSGBM> stereo = cv::StereoSGBM::create(minDisparity, numDisparities, blockSize,
-                                                            P1, P2, disp12MaxDiff, preFilterCap,
-                                                            uniquenessRatio, speckleWindowSize,
-                                                            speckleRange, mode);
+    //***********have to use opencv4.8.1 for now, opencv4.5 gives different results!!!!!!!!!!
+    cv::reprojectImageTo3D(disparity, points3D, Q);
 
-    // Compute left disparity map
-    cv::Mat dispL;
-    stereo->compute(imgL, imgR, dispL);
-
-    if (use_wls) {
-        // WLS filter parameters
-        double lmbda = 80000;
-        double sigma = 1.3;
-
-        // Create right matcher and compute right disparity map
-        cv::Ptr<cv::StereoMatcher> right_matcher = cv::ximgproc::createRightMatcher(stereo);
-        cv::Mat dispR;
-        right_matcher->compute(imgR, imgL, dispR);
-
-        // Create and apply WLS filter
-        cv::Ptr<cv::ximgproc::DisparityWLSFilter> wls_filter = cv::ximgproc::createDisparityWLSFilter(stereo);
-        wls_filter->setLambda(lmbda);
-        wls_filter->setSigmaColor(sigma);
-        wls_filter->filter(dispL, imgL, dispL, dispR);
+    // Scale the 3D points
+    for (int i = 0; i < points3D.rows; ++i) {
+        for (int j = 0; j < points3D.cols; ++j) {
+            cv::Point3f& pt = points3D.at<cv::Point3f>(i, j);
+            pt.x *= scale;
+            pt.y *= scale;
+            pt.z *= scale;
+        }
     }
 
-    dispL.convertTo(dispL, CV_32F, 1.0 / 16);
-    return dispL;
+    return points3D;
 }
+
 
 
 
@@ -1222,11 +1668,264 @@ std::pair<cv::Mat, cv::Mat> get_rectify_image(const cv::Mat &imgL, const cv::Mat
     cv::Mat right_map_y = camera_config.at("right_map_y");
 
     cv::Mat rectifiedL, rectifiedR;
+
+
+    //***********have to use opencv4.8.1 for now, opencv4.5 gives different results!!!!!!!!!!
     cv::remap(imgL, rectifiedL, left_map_x, left_map_y, cv::INTER_LINEAR, cv::BORDER_CONSTANT);
     cv::remap(imgR, rectifiedR, right_map_x, right_map_y, cv::INTER_LINEAR, cv::BORDER_CONSTANT);
 
+
+
+
     return {rectifiedL, rectifiedR};
 }
+
+
+//calcuate 3d and depth:
+// Function to create a StereoSGBM object
+
+//***********have to use opencv4.8.1 for now, opencv4.5 gives different results!!!!!!!!!!
+cv::Ptr<cv::StereoSGBM> StereoSGBM_create(int minDisparity, int numDisparities, int blockSize, int P1, int P2, 
+                                          int disp12MaxDiff, int preFilterCap, int uniquenessRatio, 
+                                          int speckleWindowSize, int speckleRange, int mode) {
+    return cv::StereoSGBM::create(minDisparity, numDisparities, blockSize, P1, P2, disp12MaxDiff,
+                                  preFilterCap, uniquenessRatio, speckleWindowSize, speckleRange, mode);
+}
+
+// Function to reproject a disparity image to 3D
+
+cv::Mat reprojectImageTo3D(const cv::Mat& disparity, const cv::Mat& Q, cv::Mat* _3dImage = nullptr, 
+                           bool handleMissingValues = false, int ddepth = -1) {
+    cv::Mat points3D;
+    //***********have to use opencv4.8.1 for now, opencv4.5 gives different results!!!!!!!!!!
+    cv::reprojectImageTo3D(disparity, points3D, Q, handleMissingValues, ddepth);
+    if (_3dImage) {
+        *_3dImage = points3D;
+    }
+    return points3D;
+}
+
+// Function to get depth from a disparity image
+cv::Mat get_depth(const cv::Mat& disparity, const cv::Mat& Q, float scale = 1.0, bool method = true) {
+    cv::Mat depth;
+    if (method) {
+        cv::Mat points3D = reprojectImageTo3D(disparity, Q);
+        std::vector<cv::Mat> channels(3);
+        cv::split(points3D, channels);
+        depth = channels[2]; // Z channel
+    } else {
+        float baseline = 1.0f / static_cast<float>(Q.at<double>(3, 2));
+        float fx = std::abs(static_cast<float>(Q.at<double>(2, 3)));
+        depth = (fx * baseline) / disparity;
+    }
+    depth *= scale;
+    return depth;
+}
+
+// WLSFilter class
+class WLSFilter {
+public:
+    WLSFilter(cv::Ptr<cv::StereoMatcher> left_matcher, double lmbda = 80000, double sigma = 1.3) {
+        //***********have to use opencv4.8.1 for now, opencv4.5 gives different results!!!!!!!!!!
+        filter = cv::ximgproc::createDisparityWLSFilter(left_matcher);
+        filter->setLambda(lmbda);
+        filter->setSigmaColor(sigma);
+    }
+
+    void disparity_filter(cv::Mat& dispL, const cv::Mat& imgL, const cv::Mat& dispR) {
+        filter->filter(dispL, imgL, cv::noArray(), dispR);
+    }
+
+private:
+    cv::Ptr<cv::ximgproc::DisparityWLSFilter> filter;
+};
+
+// Function to get filtered disparity
+cv::Mat get_filter_disparity( cv::Mat& imgL,  cv::Mat& imgR, bool use_wls = true) {
+    
+
+    // if (imgL.cols > 500 && imgL.rows > 500) {
+    //     uchar pixelValue = imgL.at<uchar>(500, 500);
+    //     uchar pixelValue2 = imgL.at<uchar>(500, 500);
+    //     std::cout << "Pixel value at (500, 500): " << static_cast<int>(pixelValue) <<static_cast<int>(pixelValue2) << std::endl;
+    // } else {
+    //     std::cout << "Pixel coordinates are out of bounds." << std::endl;
+    // }
+
+
+
+    int channels = imgL.channels();
+    int blockSize = 3;
+
+
+    //check this link to know the order of parameter!!!!!!!!: https://docs.opencv.org/3.4/d2/d85/classcv_1_1StereoSGBM.html
+    cv::Ptr<cv::StereoSGBM> matcherL = cv::StereoSGBM::create(
+        0,                  // minDisparity
+        5 * 16,             // numDisparities
+        blockSize,          // blockSize
+        8 * 3 * blockSize,  // P1
+        32 * 3 * blockSize, // P2
+        12,                 // disp12MaxDiff
+        63,                 // preFilterCap
+        10,                 // uniquenessRatio
+        50,                 // speckleWindowSize
+        32,                 // speckleRange
+        cv::StereoSGBM::MODE_SGBM_3WAY
+    );
+
+    // std::cout << "minDisparity: " << matcherL->getMinDisparity() << std::endl;
+    // std::cout << "numDisparities: " << matcherL->getNumDisparities() << std::endl;
+    // std::cout << "blockSize: " << matcherL->getBlockSize() << std::endl;
+    // std::cout << "P1: " << matcherL->getP1() << std::endl;
+    // std::cout << "P2: " << matcherL->getP2() << std::endl;
+    // std::cout << "disp12MaxDiff: " << matcherL->getDisp12MaxDiff() << std::endl;
+    // std::cout << "uniquenessRatio: " << matcherL->getUniquenessRatio() << std::endl;
+    // std::cout << "speckleWindowSize: " << matcherL->getSpeckleWindowSize() << std::endl;
+    // std::cout << "speckleRange: " << matcherL->getSpeckleRange() << std::endl;
+    // std::cout << "preFilterCap: " << matcherL->getPreFilterCap() << std::endl;
+    // std::cout << "mode: " << matcherL->getMode() << std::endl;
+
+    //here imgL and imgR is uchar
+    //coverts to uint in python number
+    // Convert imgL to CV_8U data type
+    
+    if (imgL.depth() != CV_8U) {
+        cv::Mat tempL;
+        imgL.convertTo(tempL, CV_8U);
+        imgL = tempL;
+    }
+
+    // Convert imgR to CV_8U data type
+    if (imgR.depth() != CV_8U) {
+        cv::Mat tempR;
+        imgR.convertTo(tempR, CV_8U);
+        imgR = tempR;
+    }
+
+
+
+    // // Check if the coordinates are within the bounds of imgL
+    // if (500 < imgL.rows && 500 < imgL.cols) {
+    //     // Get the value at (500,500) in imgL
+    //     uchar valueL = imgL.at<uchar>(500, 500);
+    //     std::cout << "Value at (500,500) in imgL: " << static_cast<int>(valueL) << std::endl;
+    // } else {
+    //     std::cout << "Coordinates (500,500) are out of bounds in imgL." << std::endl;
+    // }
+
+    // // Check if the coordinates are within the bounds of imgR
+    // if (500 < imgR.rows && 500 < imgR.cols) {
+    //     // Get the value at (500,500) in imgR
+    //     uchar valueR = imgR.at<uchar>(500, 500);
+    //     std::cout << "Value at (500,500) in imgR: " << static_cast<int>(valueR) << std::endl;
+    // } else {
+    //     std::cout << "Coordinates (500,500) are out of bounds in imgR." << std::endl;
+    // }
+
+    // //from here imgL and imgR are the same
+
+
+    cv::Mat dispL;
+    //***********have to use opencv4.8.1 for now, opencv4.5 gives different results!!!!!!!!!!
+    matcherL->compute(imgL, imgR, dispL); // Corrected compute call
+
+    // dispL.convertTo(dispL, CV_32F, 1.0/16);
+
+
+    // // Ensure the requested coordinates are within the matrix bounds
+    // if (500 < dispL.rows && 500 < dispL.cols) {
+    //     // Assuming dispL is of type CV_16S (signed 16-bit integer)
+    //     if (dispL.type() == CV_16S) {
+    //         short value = dispL.at<short>(501, 500);
+    //         std::cout << "Value at (500,500): " << value << std::endl;
+    //     }
+    //     // If dispL is of another type, you'll need to adjust the code accordingly.
+    //     // For example, if dispL is CV_8U (unsigned 8-bit integer), use:
+    //     // unsigned char value = dispL.at<unsigned char>(500, 500);
+    // }
+    // else {
+    //     std::cout << "Coordinates (500,500) are out of bounds." << std::endl;
+    // }
+
+
+
+
+    dispL.convertTo(dispL, CV_16S);
+    
+
+
+
+
+
+    if (use_wls) {
+        // Create the right matcher and compute the right disparity map
+        //***********have to use opencv4.8.1 for now, opencv4.5 gives different results!!!!!!!!!!
+        cv::Ptr<cv::StereoMatcher> matcherR = cv::ximgproc::createRightMatcher(matcherL);
+        cv::Mat dispR;
+        matcherR->compute(imgR, imgL, dispR); // Corrected compute call
+        dispR.convertTo(dispR, CV_16S);
+
+        // Create and configure the WLS filter
+        double lambda = 80000.0;
+        double sigma = 1.3;
+        //***********have to use opencv4.8.1 for now, opencv4.5 gives different results!!!!!!!!!!
+        cv::Ptr<cv::ximgproc::DisparityWLSFilter> wlsFilter = cv::ximgproc::createDisparityWLSFilter(matcherL);
+        wlsFilter->setLambda(lambda);
+        wlsFilter->setSigmaColor(sigma);
+
+        // Apply the WLS filter
+        cv::Mat filteredDispL;
+        wlsFilter->filter(dispL, imgL, filteredDispL, dispR);
+        filteredDispL.convertTo(filteredDispL, CV_16S);
+
+        dispL = filteredDispL;
+    }
+
+    // // Ensure the requested coordinates are within the matrix bounds
+    // if (500 < dispL.rows && 500 < dispL.cols) {
+    //     // Assuming dispL is of type CV_16S (signed 16-bit integer)
+    //     if (dispL.type() == CV_16S) {
+    //         short value = dispL.at<short>(500, 500);
+    //         std::cout << "Value at (500,500): " << value << std::endl;
+    //     }
+    //     // If dispL is of another type, you'll need to adjust the code accordingly.
+    //     // For example, if dispL is CV_8U (unsigned 8-bit integer), use:
+    //     // unsigned char value = dispL.at<unsigned char>(500, 500);
+    // }
+    // else {
+    //     std::cout << "Coordinates (500,500) are out of bounds." << std::endl;
+    // }
+
+
+
+    
+    dispL = cv::max(dispL, 0);
+    dispL.convertTo(dispL, CV_32F, 1.0 / 16);
+
+    // // Ensure the requested coordinates are within the matrix bounds
+    // if (500 < dispL.rows && 500 < dispL.cols) {
+    //     // Assuming dispL is of type CV_16S (signed 16-bit integer)
+    //     if (dispL.type() == CV_32F) {
+    //         float value = dispL.at<float>(500, 500);
+    //         std::cout << "Value at (500,500): " << value << std::endl;
+    //     }
+    //     // If dispL is of another type, you'll need to adjust the code accordingly.
+    //     // For example, if dispL is CV_8U (unsigned 8-bit integer), use:
+    //     // unsigned char value = dispL.at<unsigned char>(500, 500);
+    // }
+    // else {
+    //     std::cout << "Coordinates (500,500) are out of bounds." << std::endl;
+    // }
+
+
+
+
+    return dispL;//the outputs format is CV_32F
+
+}
+
+
+
 
 
 //end of triangulation
@@ -1238,15 +1937,7 @@ void printKeypoints(const std::vector<Keypoint>& keypoints) {
     }
 }
 
-void printDepth3Ds(const std::vector<std::vector<float>>& depth_3ds) {
-    for (size_t i = 0; i < depth_3ds.size(); ++i) {
-        std::cout << "Depth vector " << i << ": ";
-        for (size_t j = 0; j < depth_3ds[i].size(); ++j) {
-            std::cout << depth_3ds[i][j] << " ";
-        }
-        std::cout << std::endl;
-    }
-}
+
 
 void printDepthValues(const cv::Mat& depth, int numRowsToPrint = 5, int numColsToPrint = 5) {
     std::cout << "Depth values:" << std::endl;
@@ -1259,253 +1950,640 @@ void printDepthValues(const cv::Mat& depth, int numRowsToPrint = 5, int numColsT
 }
 
 
-int main(int argc, char **argv)
+std::vector<float> calculateDistances(
+    const std::vector<cv::Vec3f>& depth_3d,
+    const std::vector<std::vector<int>>& vec_inds) {
+
+    std::vector<float> distances;
+
+    for (const auto& pair : vec_inds) {
+        if (depth_3d[pair[0]] == cv::Vec3f(0, 0, 0) || depth_3d[pair[1]] == cv::Vec3f(0, 0, 0)) {
+            // If either of the points is (0, 0, 0)
+            distances.push_back(0);
+        } else {
+            // Calculate Euclidean distance
+            float dx = depth_3d[pair[0]][0] - depth_3d[pair[1]][0];
+            float dy = depth_3d[pair[0]][1] - depth_3d[pair[1]][1];
+            float dz = depth_3d[pair[0]][2] - depth_3d[pair[1]][2];
+            float distance = std::sqrt(dx * dx + dy * dy + dz * dz) / 10.0f;
+            distances.push_back(distance);
+        }
+    }
+
+    return distances;
+}
+
+
+// Function to print the 3D points
+void printDepth3D(const std::vector<cv::Vec3f>& depth_3d) {
+    for (const auto& point : depth_3d) {
+        std::cout << "Point (x, y, depth): (" << point[0] << ", " << point[1] << ", " << point[2] << ")" << std::endl;
+    }
+}
+
+//end of triangulation functions
+//****************************************
+
+
+
+//start of post processing mag algorithm
+//****************************************
+//********havent validated all
+void printNestedVector(const std::vector<std::vector<float>>& nestedVector) {
+    for (size_t i = 0; i < nestedVector.size(); ++i) {
+        std::cout << "Inner vector " << i << ": ";
+        for (size_t j = 0; j < nestedVector[i].size(); ++j) {
+            std::cout << nestedVector[i][j] << " ";
+        }
+        std::cout << std::endl; // Print a newline at the end of each inner vector
+    }
+}
+
+
+float calculateVariance(const std::vector<float>& data) {
+    if (data.empty()) {
+        return 0.0f; // Handle empty vector case
+    }
+
+    // Step 1: Calculate the mean of non-zero values
+    float sum = 0.0f;
+    size_t count = 0;
+    for (float value : data) {
+        if (value != 0.0f) {
+            sum += value;
+            ++count;
+        }
+    }
+    if (count == 0) {
+        return 0.0f; // All values are zero or empty data
+    }
+    float mean = sum / count;
+
+    // Step 2: Calculate the sum of squared differences from the mean for non-zero values
+    float varianceSum = 0.0f;
+    for (float value : data) {
+        if (value != 0.0f) {
+            varianceSum += (value - mean) * (value - mean);
+        }
+    }
+
+    // Step 3: Calculate the variance
+    float variance = varianceSum / count;
+    return variance;
+}
+
+
+
+class Frame {
+public:
+    std::vector<float> mean_local;
+    std::vector<float> range_local;
+    std::vector<std::vector<float>> parts_local;
+    std::string frame_name;
+
+    // Default constructor
+    Frame() = default;
+
+    // Existing constructor
+    Frame(const std::vector<float>& mean_local, const std::vector<float>& range_local, 
+          const std::vector<std::vector<float>>& parts_local, const std::string& frame_name)
+        : mean_local(mean_local), range_local(range_local), 
+          parts_local(parts_local), frame_name(frame_name) {}
+
+    void printMeanAndRange() const {
+        std::cout << "mean: ";
+        for (float value : mean_local) {
+            std::cout << value << " ";
+        }
+        std::cout << std::endl;
+
+        std::cout << "range: ";
+        for (float value : range_local) {
+            std::cout << value << " ";
+        }
+        std::cout << std::endl;
+    }
+
+};
+
+
+Frame merge(const std::vector<std::vector<float>>& merge_parts, const std::string& string_a, const std::string& string_b) {
+    std::vector<float> ranges;
+    std::vector<float> means;
+    std::vector<std::vector<float>> result_part;
+
+    // std::cout << "-------------" << std::endl;
+    // printNestedVector(merge_parts);
+    
+    for (const auto& part : merge_parts) {
+        if (part.empty()) {
+            continue; // Skip empty parts
+        }
+
+        std::vector<float> temp = part;
+        std::sort(temp.begin(), temp.end());
+        size_t n = temp.size();
+
+        float range1 = 0.5f;
+        float mean1 = 0.0f;
+        size_t low_bound = static_cast<size_t>(0.4 * n);
+        size_t up_bound = static_cast<size_t>(0.6 * n);
+
+        if (n > 5) {
+            range1 = temp[up_bound] - temp[low_bound];
+            mean1 = temp[n / 2]; // Median for odd number of elements
+            if (n % 2 == 0) {
+                mean1 = (temp[n / 2 - 1] + temp[n / 2]) / 2.0f; // Median for even number of elements
+            }
+        } else if (n == 5) {
+            range1 = (temp[3] - temp[1]) / 2;
+            mean1 = temp[2];
+        } else if (n == 4) {
+            range1 = (temp[2] - temp[1]) / 2;
+            mean1 = (temp[1] + temp[2]) / 2;
+        } else if (n == 3) {
+            mean1 = temp[1];
+        } else if (n == 2) {
+            mean1 = (temp[0] + temp[1]) / 2;
+        } else if (n == 1) {
+            mean1 = temp[0];
+        }
+
+        range1 = std::max(0.5f, std::min(range1, 1.5f));
+
+        result_part.push_back(temp);
+        ranges.push_back(range1);
+        means.push_back(mean1);
+    }
+
+    std::string merged_file_name = string_a + string_b;
+    return Frame(means, ranges, result_part, merged_file_name);
+}
+
+
+// Function to extract numerical part from filename and sort based on it
+bool sortNumerically(const std::string& a, const std::string& b) {
+    std::regex rgx("([0-9]+)");
+    std::smatch matchA, matchB;
+
+    if (std::regex_search(a, matchA, rgx) && std::regex_search(b, matchB, rgx)) {
+        int numA = std::stoi(matchA[1]);
+        int numB = std::stoi(matchB[1]);
+        return numA < numB;
+    }
+    return a < b; // Fallback to lexicographical sorting
+}
+
+
+void printKeypoints(const std::vector<std::vector<Keypoint>>& keypoints) {
+    for (size_t i = 0; i < keypoints.size(); ++i) {
+        std::cout << "Vector " << i << ":" << std::endl;
+        for (size_t j = 0; j < keypoints[i].size(); ++j) {
+            std::cout << "Keypoint " << j << ": (" << keypoints[i][j].x << ", " << keypoints[i][j].y << ")" << std::endl;
+        }
+    }
+}
+
+
+std::vector<Keypoint> calculateAverageKeypoints(const std::vector<std::vector<Keypoint>>& keypoints) {
+    if (keypoints.empty()) {
+        return {}; // Return empty vector if input is empty
+    }
+
+    size_t numKeypoints = keypoints[0].size(); // Number of keypoints in each vector
+    std::vector<Keypoint> averages(numKeypoints, {0, 0}); // Initialize averages with zero
+    std::vector<int> validCounts(numKeypoints, 0); // Count of valid (non-zero) keypoints
+
+    for (const auto& vec : keypoints) {
+        if (vec.size() != numKeypoints) {
+            std::cerr << "Inconsistent number of keypoints in vectors" << std::endl;
+            return {}; // Handle error or inconsistency
+        }
+        for (size_t i = 0; i < numKeypoints; ++i) {
+            if (vec[i].x != 0 && vec[i].y != 0) {
+                averages[i].x += vec[i].x;
+                averages[i].y += vec[i].y;
+                validCounts[i]++;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < numKeypoints; ++i) {
+        if (validCounts[i] > 0) {
+            averages[i].x /= validCounts[i];
+            averages[i].y /= validCounts[i];
+        }
+    }
+
+    return averages;
+}
+//****************************************
+//end of post processing mag algorithm
+
+
+
+
+
+//main function
+//****************************************
+Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_interpreter, const std::unique_ptr<tflite::Interpreter>& movenet_interpreter,  const std::string& imgf1,  const std::string& imgf2)
 {
 
 
-  float movenet_threshold=0.1;
-  float detection_threshold=0.57;
-  int loop_theshold=8;
+    float movenet_threshold=0.1;
+    float detection_threshold=0.57;
+    int loop_theshold=8;
+    float variance_threshold=3;
+    int required_variance_point=8;
+    double intersect_threshold=2.000001e-5;
 
 
-  std::vector<std::string> coco_names = {
-      "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
-      "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog",
-      "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag",
-      "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove",
-      "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl",
-      "banana", "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
-      "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard",
-      "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
-      "teddy bear", "hair drier", "toothbrush"
-  };
+    std::vector<std::string> coco_names = {
+        "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
+        "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog",
+        "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag",
+        "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove",
+        "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl",
+        "banana", "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
+        "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard",
+        "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
+        "teddy bear", "hair drier", "toothbrush"
+    };
 
 
-  // create model
-  std::unique_ptr<tflite::FlatBufferModel> model =
-      tflite::FlatBufferModel::BuildFromFile("yolov8s_integer_quant.tflite");
-  
-  //   auto ext_delegate_option = TfLiteExternalDelegateOptionsDefault("/usr/lib/libvx_delegate.so");
-  //   auto ext_delegate_ptr = TfLiteExternalDelegateCreate(&ext_delegate_option);
-  tflite::ops::builtin::BuiltinOpResolver resolver;
-  std::unique_ptr<tflite::Interpreter> interpreter;
-  tflite::InterpreterBuilder(*model, resolver)(&interpreter);
-  //   interpreter->ModifyGraphWithDelegate(ext_delegate_ptr);
-  interpreter->SetAllowFp16PrecisionForFp32(false);
-  interpreter->AllocateTensors();
+    // // create model
+    // std::unique_ptr<tflite::FlatBufferModel> model =
+    //     tflite::FlatBufferModel::BuildFromFile("yolov8s_integer_quant.tflite");
 
-  // std::cout << " Tensorflow Test " << endl;
+    // //   auto ext_delegate_option = TfLiteExternalDelegateOptionsDefault("/usr/lib/libvx_delegate.so");
+    // //   auto ext_delegate_ptr = TfLiteExternalDelegateCreate(&ext_delegate_option);
+    // tflite::ops::builtin::BuiltinOpResolver resolver;
+    // std::unique_ptr<tflite::Interpreter> interpreter;
+    // tflite::InterpreterBuilder(*model, resolver)(&interpreter);
+    // //   interpreter->ModifyGraphWithDelegate(ext_delegate_ptr);
+    // interpreter->SetAllowFp16PrecisionForFp32(false);
+    // interpreter->AllocateTensors();
 
-  // if (argc == 3)
-  // {
-  //   imgf1 = argv[1];
-  //   imgf2 = argv[2];
-  //   cout << imgf1 << " " << imgf2 << endl;
-  // }
 
 
-  //end of calling C++ tflite intrepter
+    // std::cout << " Tensorflow Test " << endl;
 
+    // if (argc == 3)
+    // {
+    //   imgf1 = argv[1];
+    //   imgf2 = argv[2];
+    //   cout << imgf1 << " " << imgf2 << endl;
+    // }
 
-  string imgf1 ="./test/left_front5.jpg";
-  string imgf2 ="./test/right_front5.jpg";
 
+    //end of calling C++ tflite intrepter
 
 
-  cv::Mat img1 = cv::imread(imgf1);
-  if (img1.empty()) {
-      std::cerr << "Failed to load image." << std::endl;
-      // You should return an empty cv::Mat or handle errors differently.
-      return 0;
-  }
+    // string imgf1 ="./test/left_front5.jpg";
+    // string imgf2 ="./test/right_front5.jpg";
 
-  cv::Mat img2 = cv::imread(imgf2);
-  if (img2.empty()) {
-      std::cerr << "Failed to load image." << std::endl;
-      // You should return an empty cv::Mat or handle errors differently.
-      return 0;
-  }
 
 
-  std::vector<std::vector<float>> results1 = process_4(interpreter,img1, detection_threshold);
-  // plotBboxes(img1, results1, coco_names, "./output1.jpg");
+    cv::Mat img1 = cv::imread(imgf1);
+    if (img1.empty()) {
+        std::cerr << "Failed to load image." << std::endl;
+        // You should return an empty cv::Mat or handle errors differently.
+        return Frame();
+    }
 
+    cv::Mat img2 = cv::imread(imgf2);
+    if (img2.empty()) {
+        std::cerr << "Failed to load image." << std::endl;
+        // You should return an empty cv::Mat or handle errors differently.
+        return Frame();
+    }
 
-  std::vector<std::vector<float>> results2 = process_4(interpreter,img2, detection_threshold);
-  // plotBboxes(img2, results2, coco_names, "./output2.jpg");
+    std::string stereo_file = "./stereo_cam.yml";
 
+    // Call the function and get the camera configuration
+    std::map<std::string, cv::Mat> camera_config = get_stereo_coefficients(stereo_file);
 
-  // //draw the box on the image
-  // plotBboxes(img1, results1, coco_names, "./output1.jpg");
-  // plotBboxes(img2, results2, coco_names, "./output2.jpg");
+    cv::Mat imgL = cv::imread(imgf1);
+    cv::Mat imgR = cv::imread(imgf2);
 
-  //end of detection model
 
+    // Rectify the images
+    auto [rectifiedL, rectifiedR] = get_rectify_image(imgL, imgR, camera_config);
 
 
-  //*****************************************
-  //start to get the 3d depth
-  
-  // ////start triangulation
+    std::vector<std::vector<float>> results1 = process_4(detection_interpreter,rectifiedL, detection_threshold);
 
 
+    //*****************************************
+    //start to get the 3d depth
 
-  // // Load your left and right images (frameL and frameR) using cv::imread
-  // cv::Mat frameL = cv::imread("path_to_left_image.jpg");
-  // cv::Mat frameR = cv::imread("path_to_right_image.jpg");
 
-  // // Assuming camera_config is loaded and available
-  // std::map<std::string, cv::Mat> camera_config; // Load your camera_config
 
-  std::string stereo_file = "./stereo_cam.yml";
+    // // Save the rectified images
+    // cv::imwrite("./rect_l.jpg", rectifiedL);
+    // cv::imwrite("./rect_r.jpg", rectifiedR);
+    // //********************
 
-  // Call the function and get the camera configuration
-  std::map<std::string, cv::Mat> camera_config = get_stereo_coefficients(stereo_file);
 
-  cv::Mat imgL = cv::imread(imgf1);
-  cv::Mat imgR = cv::imread(imgf2);
 
-  // Rectify the images
-  auto [rectifiedL, rectifiedR] = get_rectify_image(imgL, imgR, camera_config);
+    // Compute the disparity map
+    cv::Mat grayL, grayR;
+    cv::cvtColor(rectifiedL, grayL, cv::COLOR_BGR2GRAY);
+    cv::cvtColor(rectifiedR, grayR, cv::COLOR_BGR2GRAY);
 
-  // Save the rectified images
-  cv::imwrite("./rect_l.jpg", rectifiedL);
-  cv::imwrite("./rect_r.jpg", rectifiedR);
+    cv::Mat grayL_copy=grayL.clone();
+    cv::Mat grayR_copy=grayR.clone();
 
 
-  //from here proves correct
-  //now get the 3d depth map
+    cv::Mat dispL = get_filter_disparity(grayL_copy, grayR_copy, true);
 
 
+    // ***** the disparity is correct
 
-  // Compute the disparity map
-  cv::Mat grayL, grayR;
-  cv::cvtColor(rectifiedL, grayL, cv::COLOR_BGR2GRAY);
-  cv::cvtColor(rectifiedR, grayR, cv::COLOR_BGR2GRAY);
+    // Convert the disparity map to 3D points
+    cv::Mat Q = camera_config["Q"];
+    cv::Mat points_3d = get_3dpoints(dispL, Q);
 
-  cv::Mat dispL = get_disparity(grayL, grayR);
 
-  // Convert the disparity map to 3D points
-  cv::Mat Q = camera_config["Q"];
-  cv::Mat points_3d = get_3dpoints(dispL, Q);
+    if (points_3d.empty()) {
+        std::cerr << "Error: points_3d matrix is empty." << std::endl;
+        return Frame();
+    }
 
-  // // Split the 3D points into x, y, and depth
-  // std::vector<cv::Mat> channels(3);
-  // cv::split(points_3d, channels);
-  // cv::Mat x = channels[0];
-  // cv::Mat y = channels[1];
-  // cv::Mat depth = channels[2];
+    if (points_3d.type() != CV_32FC3) {
+        std::cerr << "Error: points_3d matrix is not of type CV_32FC3." << std::endl;
+        return Frame();
+    }
 
-  // printDepthValues(depth);
+    if (points_3d.channels() != 3) {
+        std::cerr << "Error: points_3d does not have 3 channels." << std::endl;
+        return Frame();
+    }
 
+    std::vector<cv::Mat> channels;
+    cv::split(points_3d, channels);
+    cv::Mat x = channels[0];
+    cv::Mat y = channels[1];
+    cv::Mat depth = channels[2];
 
 
-  //end of 3d depth
+    // xyz_coord is the same as points_3d
+    cv::Mat xyz_coord = points_3d; 
 
 
 
+    //*****************************************
+    //this is for movenet
 
+    //define line segments
+    std::vector<std::vector<int>> vec_inds = {
+        {6, 5}, {6, 8}, {8, 10}, {5, 7}, {7, 9}, {12, 14}, {14, 16}, {11, 13}, {13, 15}, {6, 12}, {5, 11}, {12, 11}
+    };
 
-  //*****************************************
-  //this is for movenet
 
+    // //prepare the intrepreter of movenet    
+    // std::unique_ptr<tflite::FlatBufferModel> model_movenet=tflite::FlatBufferModel::BuildFromFile("./movenet.tflite");
+    // tflite::ops::builtin::BuiltinOpResolver resolver_movenet;
+    // std::unique_ptr<tflite::Interpreter> interpreter_movenet;
+    // tflite::InterpreterBuilder(*model_movenet, resolver_movenet)(&interpreter_movenet);
 
+    // interpreter_movenet->SetAllowFp16PrecisionForFp32(false);
+    // interpreter_movenet->AllocateTensors();
+    //end of movenet interpreter
 
-  //prepare the intrepreter of movenet    
-  std::unique_ptr<tflite::FlatBufferModel> model_movenet=tflite::FlatBufferModel::BuildFromFile("./movenet.tflite");
-  tflite::ops::builtin::BuiltinOpResolver resolver_movenet;
-  std::unique_ptr<tflite::Interpreter> interpreter_movenet;
-  tflite::InterpreterBuilder(*model_movenet, resolver_movenet)(&interpreter_movenet);
 
-  interpreter_movenet->SetAllowFp16PrecisionForFp32(false);
-  interpreter_movenet->AllocateTensors();
-  //end of movenet interpreter
+    // std::cout << bbox_pair.size() << std::endl;
 
+    //do movenet inference
 
-  // std::cout << bbox_pair.size() << std::endl;
-  
-  //do movenet inference
 
 
+    std::vector<float> box1;
 
-  std::vector<float> box1;
 
+    box1=results1[0];
 
-  box1=results1[0];
+    // std::cout << "print out box1" << std::endl;
+    // for (float value : box1) {
+    //     std::cout << value << " ";
+    // }
 
+    // std::cout << std::endl;
 
 
-  cv::Rect bbox1(cv::Point(box1[0], box1[1]), cv::Point(box1[2], box1[3]));
+    // cv::Rect bbox1(cv::Point(box1[0], box1[1]), cv::Point(box1[2], box1[3]));
 
-  cv::Mat crop1=img1(bbox1);
+    // cv::Mat crop1=rectifiedL(bbox1);
+    // Calculate crop coordinates
+    int x1 = std::max(0, static_cast<int>(box1[0] - 0.05 * (box1[2] - box1[0])));
+    int y1 = std::max(0, static_cast<int>(box1[1] - 0.05 * (box1[3] - box1[1])));
+    int x2 = std::min(rectifiedL.cols, static_cast<int>(box1[2] + 0.05 * (box1[2] - box1[0])));
+    int y2 = std::min(rectifiedL.rows, static_cast<int>(box1[3] + 0.05 * (box1[3] - box1[1])));
 
+    // Crop and save the image
+    cv::Rect cropRect(x1, y1, x2 - x1, y2 - y1);
+    cv::Mat crop1 = rectifiedL(cropRect);
 
-  //for right
 
+    std::vector<std::vector<Keypoint>> left=process_movenet_augmentation(movenet_interpreter, crop1, movenet_threshold, loop_theshold, true);
 
-  std::vector<Keypoint> left=process_movenet_augmentation(interpreter_movenet,crop1, movenet_threshold, loop_theshold);
 
 
-  //draw right one
-  for (const auto& point : left) {
-      cv::Point center(static_cast<int>(point.x), static_cast<int>(point.y));
-      // cv::circle(crop1, center, 2, cv::Scalar(0, 255, 0), -1);
-  }
+    // //draw right one on the box
+    // for (const auto& point : left) {
+    //     cv::Point center(static_cast<int>(point.x), static_cast<int>(point.y));
+    //     cv::circle(crop1, center, 2, cv::Scalar(0, 255, 0), -1);
+    // }
 
-  cv::imwrite("./movenet_image1.jpg", crop1);
+    // cv::imwrite("./movenet_image1.jpg", crop1);
 
-  // printKeypoints(left);
+    //from here is all correct
 
-  //convert 2d detection points to whole image
-  // x_adj, = point[0] + max(0, int(bbox[0] - 0.05 * (bbox[2] - bbox[0])))
-  //y_adj =, point[1] + max(0, int(bbox[1] - 0.05 * (bbox[3] - bbox[1])))
-  std::vector<Keypoint> left_converted;
+    // printKeypoints(left);
 
-  for (const auto& point : left) {
-      // cv::Point center(static_cast<int>(point.x), static_cast<int>(point.y));
-      // cv::circle(crop1, center, 2, cv::Scalar(0, 255, 0), -1);
-      int point_x=point.x+ std::max(0, static_cast<int>(box1[0]-0.05*(box1[2]-box1[0])));
-      int point_y=point.y+ std::max(0, static_cast<int>(box1[1]-0.05*(box1[3]-box1[1])));
+    //convert 2d detection points to whole image
+    // x_adj, = point[0] + max(0, int(bbox[0] - 0.05 * (bbox[2] - bbox[0])))
+    //y_adj =, point[1] + max(0, int(bbox[1] - 0.05 * (bbox[3] - bbox[1])))
 
-      Keypoint temp={point_x, point_y};
-      left_converted.push_back(temp);
-  }
+    //do the converts to orginal image
 
-  
 
-  //end of movenet
+    std::vector<std::vector<float>> list_of_mag;
 
-  //*****************************************
-  //start to use the result of movenet to get the 3d point
+    cv::Mat rectifiedL_copy=rectifiedL.clone();
 
-  std::vector<std::vector<float>> depth_3ds;
-  for (const auto& point : left_converted) {
-    int tempx = static_cast<int>(point.x); // Set these values accordingly
-    int tempy = static_cast<int>(point.y);
-    tempx = std::max(0, std::min(tempx, points_3d.cols - 1));
-    tempy = std::max(0, std::min(tempy, points_3d.rows - 1));
+    for (int i=0;i< left.size();i++){
 
-    // Access the depth value at (tempx, tempy)
-    float depth_value = points_3d.at<cv::Vec3f>(tempy, tempx)[2]; // [2] accesses the z-coordinate
 
-    // If you need to store multiple depth values
-    std::vector<float> temp;
-    temp.push_back(tempx);
-    temp.push_back(tempy);
-    temp.push_back(depth_value);
+        std::vector<Keypoint> left_converted;
 
-    depth_3ds.push_back(temp);
-  }
+        for (const auto& point : left[i]) {
+            // cv::Point center(static_cast<int>(point.x), static_cast<int>(point.y));
+            // cv::circle(crop1, center, 2, cv::Scalar(0, 255, 0), -1);
+            float x_adj = point.x + std::max(0, static_cast<int>(box1[0] - 0.05 * (box1[2] - box1[0])));
+            float y_adj = point.y + std::max(0, static_cast<int>(box1[1] - 0.05 * (box1[3] - box1[1])));
 
-  printDepth3Ds(depth_3ds);
 
+            Keypoint temp={x_adj, y_adj};
+            left_converted.push_back(temp);
+        }
 
-  //*****************************************
-  //post mag processing algorithm
 
 
-  //end of post processing algorithm
-  return 0;
+        //draw the result on origin image to make sure it is correct
+        
+
+   
+
+        
+
+        //end of movenet
+
+        //*****************************************
+        //start to use the result of movenet to get the 3d point
+
+        // Vector to store 3D points
+
+        std::vector<cv::Vec3f> depth_3d;
+
+        for (const auto& keypoint : left_converted) {
+            int tempx = static_cast<int>(keypoint.x);
+            int tempy = static_cast<int>(keypoint.y);
+
+            
+
+            // Clamp tempx and tempy to the valid range of the points_3d matrix
+            tempx = std::max(0, std::min(tempx, points_3d.cols - 1));
+            tempy = std::max(0, std::min(tempy, points_3d.rows - 1));
+
+            
+            // Access the 3D point at (tempx, tempy)
+            cv::Vec3f point3d = points_3d.at<cv::Vec3f>(tempy, tempx);
+
+            // Store the 3D point
+            depth_3d.push_back(point3d);
+        }
+
+        // printDepth3D(depth_3d);
+
+        
+
+        std::vector<float> distances = calculateDistances(depth_3d, vec_inds);
+
+        // // Output the distances
+        // for (const auto& distance : distances) {
+        //     std::cout << distance << std::endl;
+        // }
+
+
+        // *****************************************
+        // post mag processing algorithm
+
+
+        // end of post processing algorithm
+
+        list_of_mag.push_back(distances);
+
+
+
+    }
+
+
+
+    //have to draw the average of 2d pooints to check
+    std::vector<std::vector<Keypoint>> left_2d;
+    for (int i=0;i< left.size();i++){
+
+
+        std::vector<Keypoint> left_converted;
+
+        for (const auto& point : left[i]) {
+            // cv::Point center(static_cast<int>(point.x), static_cast<int>(point.y));
+            // cv::circle(crop1, center, 2, cv::Scalar(0, 255, 0), -1);
+            float x_adj = point.x + std::max(0, static_cast<int>(box1[0] - 0.05 * (box1[2] - box1[0])));
+            float y_adj = point.y + std::max(0, static_cast<int>(box1[1] - 0.05 * (box1[3] - box1[1])));
+
+
+            Keypoint temp={x_adj, y_adj};
+            left_converted.push_back(temp);
+        }
+
+        left_2d.push_back(left_converted);
+
+    }
+    std::cout << "-------" << std::endl;
+    printKeypoints(left_2d);
+
+    std::vector<Keypoint> averageKeypoints = calculateAverageKeypoints(left_2d);
+    std::cout << "-------" << std::endl;
+
+    for (size_t i = 0; i < averageKeypoints.size(); ++i) {
+        std::cout << "Average Keypoint " << i << ": (" << averageKeypoints[i].x << ", " << averageKeypoints[i].y << ")" << std::endl;
+    }
+
+
+    drawLinesBetweenPoints(rectifiedL_copy, averageKeypoints, vec_inds);
+
+    for (const auto& point : averageKeypoints) {
+        cv::Point center(static_cast<int>(point.x), static_cast<int>(point.y));
+        cv::circle(rectifiedL_copy, center, 4, cv::Scalar(0, 255, 0), -1);
+
+    }
+
+
+
+    cv::imwrite("./imgL_copy.jpg", rectifiedL_copy);
+
+
+
+
+
+
+    // printNestedVector(list_of_mag);
+
+    std::vector<std::vector<float>> variance_vector_list;
+
+    for (int i=0;i<vec_inds.size();i++){
+        std::vector<float> temp;
+
+        for(int j=0; j<list_of_mag.size(); j++ ){
+            if(list_of_mag[j][i] != 0){
+                temp.push_back(list_of_mag[j][i]);
+            }
+            
+
+        }
+        variance_vector_list.push_back(temp);
+
+
+    }
+
+
+
+    // std::cout << "---------" << std::endl;
+
+    printNestedVector(variance_vector_list);
+
+
+    int count=0;
+
+    for(int i=0;i<variance_vector_list.size();i++){
+        float variance = calculateVariance(variance_vector_list[i]);
+        if ((variance>0)&&(variance<variance_threshold )){
+            count+=1;
+        }
+    }
+
+    if (count< required_variance_point){
+        return Frame();
+    }
+    else{
+
+        Frame frame=merge(variance_vector_list, imgf1, imgf2);
+        return frame;
+
+    }
+    
 
 
 }
@@ -1513,5 +2591,109 @@ int main(int argc, char **argv)
 
 
 
+//main function
+
+
+namespace fs = std::filesystem;
+
+int main(int argc, char **argv) {
+
+
+
+    //call for the intersect first
+    double ret_val = dist_intersect(1, 1, 6, 1);
+    // std::cout << "dist_intersect: " << ret_val << std::endl;
+
+    std::map<double, double> map_probs = gen_dict();
+
+    double distri = 0.677;
+
+
+    //threshold for algorithm between frames
+    int boundary_threshold=3;
+
+
+    //call detection model and movenet model intepreter so the two interpreter won't be called twice
+
+
+    //for detection model
+    // create model
+    std::unique_ptr<tflite::FlatBufferModel> detection_model =
+        tflite::FlatBufferModel::BuildFromFile("yolov8s_integer_quant.tflite");
+
+    //   auto ext_delegate_option = TfLiteExternalDelegateOptionsDefault("/usr/lib/libvx_delegate.so");
+    //   auto ext_delegate_ptr = TfLiteExternalDelegateCreate(&ext_delegate_option);
+    tflite::ops::builtin::BuiltinOpResolver detection_resolver;
+    std::unique_ptr<tflite::Interpreter> detection_interpreter;
+    tflite::InterpreterBuilder(*detection_model, detection_resolver)(&detection_interpreter);
+    //   interpreter->ModifyGraphWithDelegate(ext_delegate_ptr);
+    detection_interpreter->SetAllowFp16PrecisionForFp32(false);
+    detection_interpreter->AllocateTensors();
+    //end of detection model
+
+
+    //for movenet model
+    //prepare the intrepreter of movenet    
+    std::unique_ptr<tflite::FlatBufferModel> movenet_model=tflite::FlatBufferModel::BuildFromFile("./movenet.tflite");
+    tflite::ops::builtin::BuiltinOpResolver movenet_resolver;
+    std::unique_ptr<tflite::Interpreter> movenet_interpreter;
+    tflite::InterpreterBuilder(*movenet_model, movenet_resolver)(&movenet_interpreter);
+
+    movenet_interpreter->SetAllowFp16PrecisionForFp32(false);
+    movenet_interpreter->AllocateTensors();
+    //end of movenet model
+
+    std::string left_dir = "./test_one/left/";
+    std::string right_dir = "./test_one/right/";
+    std::string output_folder = "./output/";
+
+    // Get list of files in left directory
+    std::vector<std::string> left_files;
+    for (const auto& entry : fs::directory_iterator(left_dir)) {
+        if (entry.path().extension() == ".jpg") {
+            left_files.push_back(entry.path().filename());
+        }
+    }
+    std::sort(left_files.begin(), left_files.end(), sortNumerically);
+
+    for (const auto& file_name : left_files) {
+        // Replace 'left' with 'right' in the filename
+        std::string right_file_name = std::regex_replace(file_name, std::regex("left"), "right");
+
+        std::string left_file_path = left_dir + file_name;
+        std::string right_file_path = right_dir + right_file_name;
+
+        std::cout << left_file_path << right_file_path << std::endl;
+
+        // Check if the corresponding right file exists
+        if (fs::exists(right_file_path)) {
+            cv::Mat frameR = cv::imread(left_file_path);
+            cv::Mat frameL = cv::imread(right_file_path);
+
+
+            Frame frame=process_eachframe(detection_interpreter, movenet_interpreter, left_file_path, right_file_path);
+            std::cout << "---------This frame is: " << std::endl;
+            frame.printMeanAndRange();
+
+        }
+    }
+
+
+
+
+    // // Output the distances
+    // for (const auto& distance : distances) {
+    //     std::cout << distance << " ";
+    // }   
+    // std::cout << std::endl;
+
+
+    return 0;
+}
+
+
+
+
 //to run this: make && ./TFLiteImageClassification
+
 
