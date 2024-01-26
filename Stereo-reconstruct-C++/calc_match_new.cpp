@@ -4,35 +4,35 @@
 #include <iostream>
 #include <algorithm>
 
-double phi(double z) {
-    return (1.0 + std::erf(z / std::sqrt(2.0))) / 2.0;
+float phi(float z) {
+    return (1.0f + std::erf(z / std::sqrt(2.0f))) / 2.0f;
 }
 
-double point_match(double dist1_mu, double dist1_sig, double val) {
-    double z = std::abs((val - dist1_mu) / dist1_sig);
-    double cum_prob = phi(z);
-    return 1 - cum_prob;
+float point_match(float dist1_mu, float dist1_sig, float val) {
+    float z = std::abs((val - dist1_mu) / dist1_sig);
+    float cum_prob = phi(z);
+    return 1.0f - cum_prob;
 }
 
-double dist_intersect(double dist1_mu, double dist1_sig, double dist2_mu, double dist2_sig) {
-    double step_sig = std::max(dist1_sig, dist2_sig);
-    double step = 6 * step_sig / 10;
-    double startx = std::min(dist1_mu, dist2_mu) - 6 * step_sig;
-    double endx = std::max(dist1_mu, dist2_mu) + 6 * step_sig;
-    double int_prob = 0;
+float dist_intersect(float dist1_mu, float dist1_sig, float dist2_mu, float dist2_sig) {
+    float step_sig = std::max(dist1_sig, dist2_sig);
+    float step = 6.0f * step_sig / 10.0f;
+    float startx = std::min(dist1_mu, dist2_mu) - 6.0f * step_sig;
+    float endx = std::max(dist1_mu, dist2_mu) + 6.0f * step_sig;
+    float int_prob = 0.0f;
 
-    for (double currx = startx; currx < endx; currx += step) {
-        double refz1 = (currx - dist1_mu) / dist1_sig;
-        double refz2 = ((currx + step) - dist1_mu) / dist1_sig;
-        double p1 = phi(refz1);
-        double p2 = phi(refz2);
-        double prob1 = std::abs(p2 - p1);
+    for (float currx = startx; currx < endx; currx += step) {
+        float refz1 = (currx - dist1_mu) / dist1_sig;
+        float refz2 = ((currx + step) - dist1_mu) / dist1_sig;
+        float p1 = phi(refz1);
+        float p2 = phi(refz2);
+        float prob1 = std::abs(p2 - p1);
 
         refz1 = (currx - dist2_mu) / dist2_sig;
         refz2 = ((currx + step) - dist2_mu) / dist2_sig;
         p1 = phi(refz1);
         p2 = phi(refz2);
-        double prob2 = std::abs(p2 - p1);
+        float prob2 = std::abs(p2 - p1);
 
         int_prob += std::min(prob1, prob2);
     }
@@ -40,44 +40,44 @@ double dist_intersect(double dist1_mu, double dist1_sig, double dist2_mu, double
     return int_prob;
 }
 
-double est_sig(double rng, double prob, const std::map<double, double>& map_probs) {
-    prob = std::round(prob * 100) / 100;
+float est_sig(float rng, float prob, const std::map<float, float>& map_probs) {
+    prob = std::round(prob * 100.0f) / 100.0f;
     auto it = map_probs.find(prob);
     if (it != map_probs.end()) {
-        return 0.5 * rng / it->second;
+        return 0.5f * rng / it->second;
     }
-    return (prob <= 0 || prob > 1) ? -1 : -1;
+    return (prob <= 0.0f || prob > 1.0f) ? -1.0f : -1.0f;
 }
 
-std::map<double, double> gen_dict() {
-    std::map<double, double> map_probs;
+std::map<float, float> gen_dict() {
+    std::map<float, float> map_probs;
     for (int x = 1; x < 350; ++x) {
-        double prob = std::round((phi(x / 100.0) - phi(-x / 100.0)) * 100) / 100;
+        float prob = std::round((phi(static_cast<float>(x) / 100.0f) - phi(static_cast<float>(-x) / 100.0f)) * 100.0f) / 100.0f;
         if (map_probs.find(prob) == map_probs.end()) {
-            map_probs[prob] = x / 100.0;
+            map_probs[prob] = static_cast<float>(x) / 100.0f;
         }
     }
     return map_probs;
 }
 
-std::pair<double, std::vector<double>> intersect(const std::vector<double>& means1, const std::vector<double>& means2, const std::vector<double>& range1, const std::vector<double>& range2, double prob, const std::map<double, double>& map_probs) {
-    double mult = 1;
-    std::vector<double> probs;
-    double tot = 0;
+std::pair<float, std::vector<float>> intersect(const std::vector<float>& means1, const std::vector<float>& means2, const std::vector<float>& range1, const std::vector<float>& range2, float prob, const std::map<float, float>& map_probs) {
+    float mult = 1.0f;
+    std::vector<float> probs;
+    float tot = 0.0f;
     int cnt = 0, nan_cnt = 0;
 
     for (size_t i = 0; i < means1.size(); ++i) {
-        double sig1 = est_sig(range1[i], prob, map_probs);
-        double sig2 = est_sig(range2[i], prob, map_probs);
-        if (sig1 == -1 || sig2 == -1) {
-            probs.push_back(std::nan(""));
+        float sig1 = est_sig(range1[i], prob, map_probs);
+        float sig2 = est_sig(range2[i], prob, map_probs);
+        if (sig1 == -1.0f || sig2 == -1.0f) {
+            probs.push_back(NAN);
             nan_cnt++;
             continue;
         }
 
-        double int_prob = dist_intersect(means1[i], sig1, means2[i], sig2);
-        if (int_prob == 0) {
-            probs.push_back(std::nan(""));
+        float int_prob = dist_intersect(means1[i], sig1, means2[i], sig2);
+        if (int_prob == 0.0f) {
+            probs.push_back(NAN);
             nan_cnt++;
             continue;
         }
@@ -88,9 +88,9 @@ std::pair<double, std::vector<double>> intersect(const std::vector<double>& mean
         probs.push_back(int_prob);
     }
 
-    double avg_prob = cnt > 0 ? tot / cnt : 0;
+    float avg_prob = cnt > 0 ? tot / cnt : 0.0f;
     if (nan_cnt > 0) {
-        mult *= std::pow(10, -nan_cnt);
+        mult *= std::pow(10.0f, -nan_cnt);
     }
 
     return {mult, probs};
@@ -100,27 +100,28 @@ std::pair<double, std::vector<double>> intersect(const std::vector<double>& mean
 
 
 int main() {
-    double ret_val = dist_intersect(1, 1, 6, 1);
+    float ret_val = dist_intersect(1.0f, 1.0f, 6.0f, 1.0f);
     std::cout << "dist_intersect: " << ret_val << std::endl;
 
-    std::map<double, double> map_probs = gen_dict();
+    std::map<float, float> map_probs = gen_dict();
 
-    double distri = 0.677;
-    std::vector<double> mean1 = {32.51783905029297, 22.714483642578124, 18.473861694335938, 23.965794372558594, 20.531011962890624, 36.12490539550781, 35.75204772949219, 34.6367431640625, 32.66388854980469, 48.96383972167969, 50.294253540039065, 20.608946228027342};
-    std::vector<double> range1 = {1.5, 0.7120620727539055, 1.5, 0.5262313842773452, 0.833995056152343, 1.004507446289061, 0.8336090087890611, 1.1875183105468778, 1.5, 1.3794799804687514, 1.5, 0.5};
+    float distri = 0.677f;
+    std::vector<float> mean1 = {32.517839f, 22.714484f, 18.473862f, 23.965794f, 20.531012f, 36.124905f, 35.752048f, 34.636743f, 32.663889f, 48.963840f, 50.294254f, 20.608946f};
+    std::vector<float> range1 = {1.5f, 0.712062f, 1.5f, 0.526231f, 0.833995f, 1.004507f, 0.833609f, 1.187518f, 1.5f, 1.379480f, 1.5f, 0.5f};
 
-    std::vector<double> mean2 = {31.859530639648437, 24.62757110595703, 20.4177490234375, 22.398268127441405, 22.508877563476563, 36.436947631835935, 36.81101684570312, 37.32706909179687, 35.57789001464844, 45.0595718383789, 47.786416625976564, 19.50404052734375};
-    std::vector<double> range2 = {0.5, 0.8721343994140653, 1.0946456909179716, 1.4546157836914055, 1.5, 0.5, 0.9813110351562528, 0.9918975830078125, 1.5, 1.5, 0.7932556152343722, 0.7743011474609389};
+    std::vector<float> mean2 = {31.859531f, 24.627571f, 20.417749f, 22.398268f, 22.508878f, 36.436948f, 36.811017f, 37.327069f, 35.577890f, 45.059572f, 47.786417f, 19.504041f};
+    std::vector<float> range2 = {0.5f, 0.872134f, 1.094646f, 1.454616f, 1.5f, 0.5f, 0.981311f, 0.991898f, 1.5f, 1.5f, 0.793256f, 0.774301f};
 
     auto [mult, probs] = intersect(mean1, mean2, range1, range2, distri, map_probs);
     std::cout << "intersect: " << mult << std::endl;
-    for (double prob : probs) {
+    for (float prob : probs) {
         std::cout << prob << " ";
     }
     std::cout << std::endl;
 
     return 0;
 }
+
 
 
 //to run this: g++ -o calc_match_new calc_match_new.cpp -ltensorflow-lite -lopencv_core -lopencv_imgproc -lopencv_highgui `pkg-config --cflags --libs opencv4` && ./calc_match_new

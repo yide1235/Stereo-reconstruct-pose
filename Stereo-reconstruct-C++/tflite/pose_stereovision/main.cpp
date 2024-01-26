@@ -19,6 +19,8 @@
 #include <numeric>
 #include <regex>
 
+#include "opencv481.h"
+
 
 
 
@@ -37,36 +39,35 @@ typedef cv::Point3_<float> Pixel;
 //***************************
 //function for intersection function
 //already have validated
-
-double phi(double z) {
-    return (1.0 + std::erf(z / std::sqrt(2.0))) / 2.0;
+float phi(float z) {
+    return (1.0f + std::erf(z / std::sqrt(2.0f))) / 2.0f;
 }
 
-double point_match(double dist1_mu, double dist1_sig, double val) {
-    double z = std::abs((val - dist1_mu) / dist1_sig);
-    double cum_prob = phi(z);
-    return 1 - cum_prob;
+float point_match(float dist1_mu, float dist1_sig, float val) {
+    float z = std::abs((val - dist1_mu) / dist1_sig);
+    float cum_prob = phi(z);
+    return 1.0f - cum_prob;
 }
 
-double dist_intersect(double dist1_mu, double dist1_sig, double dist2_mu, double dist2_sig) {
-    double step_sig = std::max(dist1_sig, dist2_sig);
-    double step = 6 * step_sig / 10;
-    double startx = std::min(dist1_mu, dist2_mu) - 6 * step_sig;
-    double endx = std::max(dist1_mu, dist2_mu) + 6 * step_sig;
-    double int_prob = 0;
+float dist_intersect(float dist1_mu, float dist1_sig, float dist2_mu, float dist2_sig) {
+    float step_sig = std::max(dist1_sig, dist2_sig);
+    float step = 6.0f * step_sig / 10.0f;
+    float startx = std::min(dist1_mu, dist2_mu) - 6.0f * step_sig;
+    float endx = std::max(dist1_mu, dist2_mu) + 6.0f * step_sig;
+    float int_prob = 0.0f;
 
-    for (double currx = startx; currx < endx; currx += step) {
-        double refz1 = (currx - dist1_mu) / dist1_sig;
-        double refz2 = ((currx + step) - dist1_mu) / dist1_sig;
-        double p1 = phi(refz1);
-        double p2 = phi(refz2);
-        double prob1 = std::abs(p2 - p1);
+    for (float currx = startx; currx < endx; currx += step) {
+        float refz1 = (currx - dist1_mu) / dist1_sig;
+        float refz2 = ((currx + step) - dist1_mu) / dist1_sig;
+        float p1 = phi(refz1);
+        float p2 = phi(refz2);
+        float prob1 = std::abs(p2 - p1);
 
         refz1 = (currx - dist2_mu) / dist2_sig;
         refz2 = ((currx + step) - dist2_mu) / dist2_sig;
         p1 = phi(refz1);
         p2 = phi(refz2);
-        double prob2 = std::abs(p2 - p1);
+        float prob2 = std::abs(p2 - p1);
 
         int_prob += std::min(prob1, prob2);
     }
@@ -74,44 +75,44 @@ double dist_intersect(double dist1_mu, double dist1_sig, double dist2_mu, double
     return int_prob;
 }
 
-double est_sig(double rng, double prob, const std::map<double, double>& map_probs) {
-    prob = std::round(prob * 100) / 100;
+float est_sig(float rng, float prob, const std::map<float, float>& map_probs) {
+    prob = std::round(prob * 100.0f) / 100.0f;
     auto it = map_probs.find(prob);
     if (it != map_probs.end()) {
-        return 0.5 * rng / it->second;
+        return 0.5f * rng / it->second;
     }
-    return (prob <= 0 || prob > 1) ? -1 : -1;
+    return (prob <= 0.0f || prob > 1.0f) ? -1.0f : -1.0f;
 }
 
-std::map<double, double> gen_dict() {
-    std::map<double, double> map_probs;
+std::map<float, float> gen_dict() {
+    std::map<float, float> map_probs;
     for (int x = 1; x < 350; ++x) {
-        double prob = std::round((phi(x / 100.0) - phi(-x / 100.0)) * 100) / 100;
+        float prob = std::round((phi(static_cast<float>(x) / 100.0f) - phi(static_cast<float>(-x) / 100.0f)) * 100.0f) / 100.0f;
         if (map_probs.find(prob) == map_probs.end()) {
-            map_probs[prob] = x / 100.0;
+            map_probs[prob] = static_cast<float>(x) / 100.0f;
         }
     }
     return map_probs;
 }
 
-std::pair<double, std::vector<double>> intersect(const std::vector<double>& means1, const std::vector<double>& means2, const std::vector<double>& range1, const std::vector<double>& range2, double prob, const std::map<double, double>& map_probs) {
-    double mult = 1;
-    std::vector<double> probs;
-    double tot = 0;
+float intersect(const std::vector<float>& means1, const std::vector<float>& means2, const std::vector<float>& range1, const std::vector<float>& range2, float prob, const std::map<float, float>& map_probs) {
+    float mult = 1.0f;
+    std::vector<float> probs;
+    float tot = 0.0f;
     int cnt = 0, nan_cnt = 0;
 
     for (size_t i = 0; i < means1.size(); ++i) {
-        double sig1 = est_sig(range1[i], prob, map_probs);
-        double sig2 = est_sig(range2[i], prob, map_probs);
-        if (sig1 == -1 || sig2 == -1) {
-            probs.push_back(std::nan(""));
+        float sig1 = est_sig(range1[i], prob, map_probs);
+        float sig2 = est_sig(range2[i], prob, map_probs);
+        if (sig1 == -1.0f || sig2 == -1.0f) {
+            probs.push_back(NAN);
             nan_cnt++;
             continue;
         }
 
-        double int_prob = dist_intersect(means1[i], sig1, means2[i], sig2);
-        if (int_prob == 0) {
-            probs.push_back(std::nan(""));
+        float int_prob = dist_intersect(means1[i], sig1, means2[i], sig2);
+        if (int_prob == 0.0f) {
+            probs.push_back(NAN);
             nan_cnt++;
             continue;
         }
@@ -122,14 +123,13 @@ std::pair<double, std::vector<double>> intersect(const std::vector<double>& mean
         probs.push_back(int_prob);
     }
 
-    double avg_prob = cnt > 0 ? tot / cnt : 0;
+    float avg_prob = cnt > 0 ? tot / cnt : 0.0f;
     if (nan_cnt > 0) {
-        mult *= std::pow(10, -nan_cnt);
+        mult *= std::pow(10.0f, -nan_cnt);
     }
 
-    return {mult, probs};
+    return mult;
 }
-
 
 
 
@@ -1005,7 +1005,7 @@ std::vector<std::vector<Keypoint>> process_movenet_augmentation(const std::uniqu
     int output_size = 17; // Assuming 17 keypoints
 
 
-    //default is 50 loops
+    //default is loops for augmentation
     for(int num=0; num<loop_threshold; num++){
 
         // Process output
@@ -1519,16 +1519,6 @@ void drawLinesBetweenPoints(cv::Mat& image, const std::vector<Keypoint>& keypoin
 
 
 
-
-
-
-
-
-
-
-
-
-
 //**********************************
 //start function for triangulation
 bool load_stereo_coefficients(const std::string &filename, cv::Mat &K1, cv::Mat &D1, cv::Mat &K2, cv::Mat &D2, cv::Mat &R, cv::Mat &T, cv::Mat &E, cv::Mat &F, cv::Size &imageSize) {
@@ -1593,7 +1583,8 @@ std::map<std::string, cv::Mat> get_stereo_coefficients(const std::string &stereo
 
 
         //***********have to use opencv4.8.1 for now, opencv4.5 gives different results!!!!!!!!!!
-        cv::stereoRectify(K1, D1, K2, D2, size, R, T, R1, R2, P1, P2, Q, cv::CALIB_ZERO_DISPARITY, 0.9);
+        // cv::stereoRectify(K1, D1, K2, D2, size, R, T, R1, R2, P1, P2, Q, cv::CALIB_ZERO_DISPARITY, 0.9);
+        stereoRectify(K1, D1, K2, D2, size, R, T, R1, R2, P1, P2, Q, cv::CALIB_ZERO_DISPARITY, 0.9);
 
         // for (int i = 0; i < R1.rows; ++i) {
         //     for (int j = 0; j < R1.cols; ++j) {
@@ -1832,12 +1823,18 @@ cv::Mat get_filter_disparity( cv::Mat& imgL,  cv::Mat& imgR, bool use_wls = true
     // dispL.convertTo(dispL, CV_32F, 1.0/16);
 
 
+    //*********************************
+    //this is test code for this
     // // Ensure the requested coordinates are within the matrix bounds
     // if (500 < dispL.rows && 500 < dispL.cols) {
     //     // Assuming dispL is of type CV_16S (signed 16-bit integer)
     //     if (dispL.type() == CV_16S) {
-    //         short value = dispL.at<short>(501, 500);
-    //         std::cout << "Value at (500,500): " << value << std::endl;
+    //         short value = dispL.at<short>(500, 500);
+    //         short value1 = dispL.at<short>(500, 501);
+    //         short value2 = dispL.at<short>(500, 502);
+    //         short value3 = dispL.at<short>(500, 503);
+    //         short value4 = dispL.at<short>(500, 504);
+    //         std::cout << "Value at (500,501,502,503,504): " << value << value1<< value2<< value3<< value4<< std::endl;
     //     }
     //     // If dispL is of another type, you'll need to adjust the code accordingly.
     //     // For example, if dispL is CV_8U (unsigned 8-bit integer), use:
@@ -2063,6 +2060,28 @@ public:
         }
         std::cout << std::endl;
     }
+    bool isEmpty() const {
+        return mean_local.empty() && range_local.empty() && parts_local.empty() && frame_name.empty();
+    }
+
+    void printDetails() const {
+        // std::cout << "Frame Name: " << frame_name << std::endl;
+        printMeanAndRange();
+        // std::cout << "Parts Local:" << std::endl;
+        // for (const auto& part : parts_local) {
+        //     if(part.empty()){
+        //         std::cout << "empty";
+        //     }
+        //     else{
+        //         for (float value : part) {
+        //             std::cout << value << " ";
+        //         }
+        //     }
+
+        //     std::cout << std::endl;
+        // }
+    }
+
 
 };
 
@@ -2076,25 +2095,46 @@ Frame merge(const std::vector<std::vector<float>>& merge_parts, const std::strin
     // printNestedVector(merge_parts);
     
     for (const auto& part : merge_parts) {
-        if (part.empty()) {
-            continue; // Skip empty parts
-        }
-
+        
         std::vector<float> temp = part;
+        float range1 = 0.5f;
+        float mean1 = 0.0f;
+
+        if (part.empty()) {
+            // continue; // Skip empty parts
+            temp={};
+            range1=0;
+            mean1=0;
+
+        }
+ 
         std::sort(temp.begin(), temp.end());
         size_t n = temp.size();
 
-        float range1 = 0.5f;
-        float mean1 = 0.0f;
+
         size_t low_bound = static_cast<size_t>(0.4 * n);
         size_t up_bound = static_cast<size_t>(0.6 * n);
 
         if (n > 5) {
+
+
+            // for (float value : temp) {
+            //     std::cout << value << " ";
+            // }
+            // std::cout << std::endl;
+
+            // assert (1==0);
+
             range1 = temp[up_bound] - temp[low_bound];
             mean1 = temp[n / 2]; // Median for odd number of elements
             if (n % 2 == 0) {
                 mean1 = (temp[n / 2 - 1] + temp[n / 2]) / 2.0f; // Median for even number of elements
             }
+
+            // std::cout << mean1 << range1 << std::endl;
+            // assert (1==0);
+
+
         } else if (n == 5) {
             range1 = (temp[3] - temp[1]) / 2;
             mean1 = temp[2];
@@ -2105,20 +2145,61 @@ Frame merge(const std::vector<std::vector<float>>& merge_parts, const std::strin
             mean1 = temp[1];
         } else if (n == 2) {
             mean1 = (temp[0] + temp[1]) / 2;
-        } else if (n == 1) {
+        } else if ((n == 1)&&(temp[0]!=0)) {
             mean1 = temp[0];
         }
 
-        range1 = std::max(0.5f, std::min(range1, 1.5f));
+        if(range1!=0){
+            range1 = std::max(0.5f, std::min(range1, 1.5f));
+        }
+        
+
+        //assume no people segments could be ver 1 meters
+        // assert ( mean1<100);
+        if(mean1>100){
+            temp={};
+            range1=0;
+            mean1=0;
+        }
+
+
 
         result_part.push_back(temp);
         ranges.push_back(range1);
         means.push_back(mean1);
     }
 
-    std::string merged_file_name = string_a + string_b;
+
+    // for (float value : means) {
+    //     std::cout << value << " ";
+    // }
+    // std::cout << std::endl;
+
+
+    // for (float value : ranges) {
+    //     std::cout << value << " ";
+    // }
+    // std::cout << std::endl;
+
+    // for (const auto& innerVec : result_part) {
+    //     for (float value : innerVec) {
+    //         std::cout << value << " ";
+    //     }
+    //     std::cout << std::endl; // End of inner vector
+    // }
+
+
+    // assert (1==0);
+    std::string merged_file_name;
+    if(string_a==string_b){
+        merged_file_name=string_a;
+    }
+    else{
+        merged_file_name = string_a + string_b;
+    }
+    
     return Frame(means, ranges, result_part, merged_file_name);
-}
+}//merge have been validated
 
 
 // Function to extract numerical part from filename and sort based on it
@@ -2177,6 +2258,194 @@ std::vector<Keypoint> calculateAverageKeypoints(const std::vector<std::vector<Ke
 
     return averages;
 }
+
+
+std::vector<float> findLargestBBox(const std::vector<std::vector<float>>& bboxes) {
+    std::vector<float> largestBBox;
+    float maxArea = 0.0f;
+
+    for (const auto& bbox : bboxes) {
+        // Ensure the class is 0
+        if (bbox[5] == 0) {
+            float width = bbox[2] - bbox[0];
+            float height = bbox[3] - bbox[1];
+            float area = width * height;
+
+            if (area > maxArea) {
+                maxArea = area;
+                largestBBox = bbox;
+            }
+        }
+    }
+
+    return largestBBox;
+}
+
+
+
+
+void printListOfFrames(const std::vector<Frame>& frames) {
+    for (const auto& frame : frames) {
+        frame.printDetails();
+        std::cout << "---------------------" << std::endl;
+    }
+}
+
+
+
+
+
+//several function are not validated
+// Function to merge two lists of floats
+std::vector<std::vector<float>> merge_lists_of_lists(const std::vector<std::vector<float>>& list1, const std::vector<std::vector<float>>& list2) {
+    if (list1.size() != list2.size()) {
+        throw std::invalid_argument("Lists must be of the same length");
+    }
+
+    std::vector<std::vector<float>> merged_list;
+    for (size_t i = 0; i < list1.size(); ++i) {
+        // Merge inner vectors
+        if (list1[i].empty() && list2[i].empty()) {
+            merged_list.push_back({}); // Both empty, add empty vector
+        } else if (list1[i].empty()) {
+            merged_list.push_back(list2[i]); // Only list1 is empty, use list2
+        } else if (list2[i].empty()) {
+            merged_list.push_back(list1[i]); // Only list2 is empty, use list1
+        } else {
+            std::vector<float> merged_inner_list;
+            merged_inner_list.insert(merged_inner_list.end(), list1[i].begin(), list1[i].end());
+            merged_inner_list.insert(merged_inner_list.end(), list2[i].begin(), list2[i].end());
+            merged_list.push_back(merged_inner_list);
+        }
+    }
+    return merged_list;
+}
+
+std::vector<Frame> remove_duplicates(const std::vector<Frame>& frames) {
+    std::vector<Frame> unique_frames;
+
+    for (const auto& frame : frames) {
+        // Check if a frame with the same frame_name is already in unique_frames
+        auto it = std::find_if(unique_frames.begin(), unique_frames.end(),
+                               [&frame](const Frame& unique_frame) {
+                                   return unique_frame.frame_name == frame.frame_name;
+                               });
+        if (it == unique_frames.end()) {
+            unique_frames.push_back(frame);
+        }
+    }
+    return unique_frames;
+}
+
+
+std::vector<Frame> add_frame(std::vector<Frame>& local_database, const Frame& frame, double threshold, double distri, std::map<float, float> map_probs) {
+    // Assuming remove_duplicates is a function that removes duplicate frames from the database
+    local_database = remove_duplicates(local_database);
+
+    if (local_database.empty()) {
+        std::cout <<"add a new one to database" << std::endl;
+        local_database.push_back(frame);
+    } else {
+        const auto& means_b = frame.mean_local;
+        const auto& ranges_b = frame.range_local;
+        bool found = false;
+
+        for (size_t i = 0; i < local_database.size(); ++i) {
+            const auto& means_a = local_database[i].mean_local;
+            const auto& ranges_a = local_database[i].range_local;
+
+            if (intersect(means_a, means_b, ranges_a, ranges_b, distri,  map_probs) > threshold) {
+                auto merge_parts = merge_lists_of_lists(local_database[i].parts_local, frame.parts_local);
+
+                std::cout << "found same one and merged!" << std::endl;
+                Frame frame_final = merge(merge_parts, frame.frame_name, local_database[i].frame_name);
+                local_database[i] = frame_final;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            std::cout << "add a new person" << std::endl;
+            local_database.push_back(frame);
+        }
+    }
+
+    local_database = remove_duplicates(local_database);
+    return local_database;
+}
+
+
+std::vector<Frame> process_frames(const std::vector<Frame>& valid_frames, const std::vector<std::pair<size_t, size_t>>& pair_index, float threshold, int boundary_threshold, double distri, std::map<float, float> map_probs ) {
+    std::vector<Frame> local_database;
+
+    for (const auto& pair : pair_index) {
+        if (intersect(valid_frames[pair.first].mean_local, valid_frames[pair.second].mean_local,
+                      valid_frames[pair.first].range_local, valid_frames[pair.second].range_local, distri, map_probs) > threshold) {
+
+
+
+            auto merged_parts = merge_lists_of_lists(valid_frames[pair.first].parts_local, valid_frames[pair.second].parts_local);
+
+     
+            Frame merged_frame = merge(merged_parts, valid_frames[pair.first].frame_name, valid_frames[pair.second].frame_name);
+
+            Frame left_merged = merged_frame;
+            Frame right_merged = merged_frame;
+            int count = 0;
+
+            for (int k = 1; k <= boundary_threshold; ++k) {
+                if ((pair.first >= k) && intersect(merged_frame.mean_local, valid_frames[pair.first - k].mean_local, 
+                        merged_frame.range_local, valid_frames[pair.first - k].range_local, distri, map_probs) > threshold) {
+                
+                    // std::cout<<"get left" << std::endl;
+                    left_merged = merge(merge_lists_of_lists(left_merged.parts_local, valid_frames[pair.first - k].parts_local), 
+                                        left_merged.frame_name, valid_frames[pair.first - k].frame_name);
+                    count++;
+                }
+
+                if ((pair.second + k < valid_frames.size()) && intersect(merged_frame.mean_local, valid_frames[pair.second + k].mean_local, 
+                        merged_frame.range_local, valid_frames[pair.second + k].range_local, distri, map_probs) > threshold) {
+
+                    // std::cout<<"get right" << std::endl;
+
+                    right_merged = merge(merge_lists_of_lists(right_merged.parts_local, valid_frames[pair.second + k].parts_local), 
+                                         right_merged.frame_name, valid_frames[pair.second + k].frame_name);
+                    count++;
+                }
+            }
+
+            Frame final_frame = merge(merge_lists_of_lists(left_merged.parts_local, right_merged.parts_local), 
+                                      left_merged.frame_name, right_merged.frame_name);
+            // std::cout << "------by here is all correct." << std::endl;
+
+            // final_frame.printDetails();
+            // assert (0==1);
+
+            local_database = add_frame(local_database, final_frame, threshold,distri, map_probs);
+        }
+        // Remove duplicates from the local database
+        local_database = remove_duplicates(local_database);
+
+        // std::cout << "At this pair the database is----------" << std::endl;
+        // // Print the contents of local_database of each loop
+        // for (const auto& frame : local_database) {
+        //     frame.printDetails();
+            
+        // }
+        // std::cout << "------------------" << std::endl;
+
+        // assert (1==0);
+
+    }
+
+
+
+    // Optional: Additional logic for further processing or printing details
+
+    return local_database;
+}
+
 //****************************************
 //end of post processing mag algorithm
 
@@ -2186,16 +2455,17 @@ std::vector<Keypoint> calculateAverageKeypoints(const std::vector<std::vector<Ke
 
 //main function
 //****************************************
-Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_interpreter, const std::unique_ptr<tflite::Interpreter>& movenet_interpreter,  const std::string& imgf1,  const std::string& imgf2)
+Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_interpreter, const std::unique_ptr<tflite::Interpreter>& movenet_interpreter,  const std::string& imgf1,  const std::string& imgf2, const std::string& output_folder)
 {
 
 
-    float movenet_threshold=0.1;
+    float movenet_threshold=0.2;
     float detection_threshold=0.57;
     int loop_theshold=8;
     float variance_threshold=3;
-    int required_variance_point=8;
-    double intersect_threshold=2.000001e-5;
+    int required_variance_point=9;
+    // double intersect_threshold=2.000001e-7;
+    int effective_range=2737;
 
 
     std::vector<std::string> coco_names = {
@@ -2356,18 +2626,23 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
 
     //do movenet inference
 
-
+    // printNestedVector(results1);  
 
     std::vector<float> box1;
 
 
-    box1=results1[0];
+    box1=findLargestBBox(results1);
+
+    //get the biggest bounding box
+
+
+
 
     // std::cout << "print out box1" << std::endl;
     // for (float value : box1) {
     //     std::cout << value << " ";
     // }
-
+ 
     // std::cout << std::endl;
 
 
@@ -2411,6 +2686,8 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     std::vector<std::vector<float>> list_of_mag;
 
     cv::Mat rectifiedL_copy=rectifiedL.clone();
+
+    std::vector<float> right_shoulder;
 
     for (int i=0;i< left.size();i++){
 
@@ -2466,7 +2743,15 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
 
         // printDepth3D(depth_3d);
 
-        
+
+        //get the depth of shoulder point
+        cv::Vec3f sixthElement = depth_3d[5];
+
+        // Access the third component (index 2) of the cv::Vec3f
+        float thirdComponent = sixthElement[2];
+
+        right_shoulder.push_back(thirdComponent);
+        //end of testing effective range
 
         std::vector<float> distances = calculateDistances(depth_3d, vec_inds);
 
@@ -2488,101 +2773,127 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
 
     }
 
+    //test effective range
+    float sum = std::accumulate(right_shoulder.begin(), right_shoulder.end(), 0.0f);
+    float average = 0.0f;
 
-
-    //have to draw the average of 2d pooints to check
-    std::vector<std::vector<Keypoint>> left_2d;
-    for (int i=0;i< left.size();i++){
-
-
-        std::vector<Keypoint> left_converted;
-
-        for (const auto& point : left[i]) {
-            // cv::Point center(static_cast<int>(point.x), static_cast<int>(point.y));
-            // cv::circle(crop1, center, 2, cv::Scalar(0, 255, 0), -1);
-            float x_adj = point.x + std::max(0, static_cast<int>(box1[0] - 0.05 * (box1[2] - box1[0])));
-            float y_adj = point.y + std::max(0, static_cast<int>(box1[1] - 0.05 * (box1[3] - box1[1])));
-
-
-            Keypoint temp={x_adj, y_adj};
-            left_converted.push_back(temp);
-        }
-
-        left_2d.push_back(left_converted);
-
-    }
-    std::cout << "-------" << std::endl;
-    printKeypoints(left_2d);
-
-    std::vector<Keypoint> averageKeypoints = calculateAverageKeypoints(left_2d);
-    std::cout << "-------" << std::endl;
-
-    for (size_t i = 0; i < averageKeypoints.size(); ++i) {
-        std::cout << "Average Keypoint " << i << ": (" << averageKeypoints[i].x << ", " << averageKeypoints[i].y << ")" << std::endl;
+    if (!right_shoulder.empty()) {
+        average = sum / static_cast<float>(right_shoulder.size());
     }
 
+    // std::cout << average << "--" << effective_range << std::endl;
+    if(average<effective_range){
 
-    drawLinesBetweenPoints(rectifiedL_copy, averageKeypoints, vec_inds);
-
-    for (const auto& point : averageKeypoints) {
-        cv::Point center(static_cast<int>(point.x), static_cast<int>(point.y));
-        cv::circle(rectifiedL_copy, center, 4, cv::Scalar(0, 255, 0), -1);
-
-    }
+        //have to draw the average of 2d pooints to check
+        std::vector<std::vector<Keypoint>> left_2d;
+        for (int i=0;i< left.size();i++){
 
 
+            std::vector<Keypoint> left_converted;
 
-    cv::imwrite("./imgL_copy.jpg", rectifiedL_copy);
+            for (const auto& point : left[i]) {
+                // cv::Point center(static_cast<int>(point.x), static_cast<int>(point.y));
+                // cv::circle(crop1, center, 2, cv::Scalar(0, 255, 0), -1);
+                float x_adj = point.x + std::max(0, static_cast<int>(box1[0] - 0.05 * (box1[2] - box1[0])));
+                float y_adj = point.y + std::max(0, static_cast<int>(box1[1] - 0.05 * (box1[3] - box1[1])));
 
 
-
-
-
-
-    // printNestedVector(list_of_mag);
-
-    std::vector<std::vector<float>> variance_vector_list;
-
-    for (int i=0;i<vec_inds.size();i++){
-        std::vector<float> temp;
-
-        for(int j=0; j<list_of_mag.size(); j++ ){
-            if(list_of_mag[j][i] != 0){
-                temp.push_back(list_of_mag[j][i]);
+                Keypoint temp={x_adj, y_adj};
+                left_converted.push_back(temp);
             }
-            
+
+            left_2d.push_back(left_converted);
 
         }
-        variance_vector_list.push_back(temp);
+        // std::cout << "-------" << std::endl;
+        // printKeypoints(left_2d);
+
+        std::vector<Keypoint> averageKeypoints = calculateAverageKeypoints(left_2d);
+        // std::cout << "-------" << std::endl;
+
+        // for (size_t i = 0; i < averageKeypoints.size(); ++i) {
+        //     std::cout << "Average Keypoint " << i << ": (" << averageKeypoints[i].x << ", " << averageKeypoints[i].y << ")" << std::endl;
+        // }
 
 
-    }
+        // drawLinesBetweenPoints(rectifiedL_copy, averageKeypoints, vec_inds);
 
+        // for (const auto& point : averageKeypoints) {
+        //ignore the first four points
+        for (int i=5; i< averageKeypoints.size();i++){
+            cv::Point center(static_cast<int>(averageKeypoints[i].x), static_cast<int>(averageKeypoints[i].y));
+            cv::circle(rectifiedL_copy, center, 4, cv::Scalar(0, 255, 0), -1);
 
-
-    // std::cout << "---------" << std::endl;
-
-    printNestedVector(variance_vector_list);
-
-
-    int count=0;
-
-    for(int i=0;i<variance_vector_list.size();i++){
-        float variance = calculateVariance(variance_vector_list[i]);
-        if ((variance>0)&&(variance<variance_threshold )){
-            count+=1;
         }
-    }
 
-    if (count< required_variance_point){
-        return Frame();
+
+        std::size_t lastSlashIndex = imgf1.find_last_of("/\\");
+        std::string filename = imgf1.substr(lastSlashIndex + 1); output_folder ;
+
+        std::string outputPath = output_folder  + filename;
+        cv::imwrite(outputPath, rectifiedL_copy);
+
+
+
+
+        // printNestedVector(list_of_mag);
+
+        std::vector<std::vector<float>> variance_vector_list;
+
+        
+        for (int i=0;i<vec_inds.size();i++){
+            std::vector<float> temp;
+
+            for(int j=0; j<list_of_mag.size(); j++ ){
+                if(list_of_mag[j][i] != 0){
+                    temp.push_back(list_of_mag[j][i]);
+                }
+                
+
+            }
+            variance_vector_list.push_back(temp);
+
+
+        }
+
+        // std::cout << variance_vector_list.size() << std::endl;
+
+        // // std::cout << "---------" << std::endl;
+
+        // printNestedVector(variance_vector_list);
+
+
+        int count=0;
+
+        for(int i=0;i<variance_vector_list.size();i++){
+            float variance = calculateVariance(variance_vector_list[i]);
+            if ((variance>0)&&(variance<variance_threshold )){
+                count+=1;
+            }
+            else{
+                variance_vector_list[i]={};
+            }
+        }
+
+        // std::cout << "count is: " <<count<<  std::endl;
+        if (count< required_variance_point){
+            return Frame();
+        }
+        else{
+
+            Frame frame=merge(variance_vector_list, imgf1, imgf2);
+            return frame;
+
+        }
     }
     else{
-
-        Frame frame=merge(variance_vector_list, imgf1, imgf2);
-        return frame;
-
+        return Frame();
     }
+
+
+
+
+
     
 
 
@@ -2600,18 +2911,18 @@ int main(int argc, char **argv) {
 
 
 
-    //call for the intersect first
-    double ret_val = dist_intersect(1, 1, 6, 1);
+    float ret_val = dist_intersect(1.0f, 1.0f, 6.0f, 1.0f);
     // std::cout << "dist_intersect: " << ret_val << std::endl;
 
-    std::map<double, double> map_probs = gen_dict();
+    std::map<float, float> map_probs = gen_dict();
 
-    double distri = 0.677;
+    double distri = 0.677f;
 
+    //double distri, std::map<float, float> map_probs 
 
     //threshold for algorithm between frames
     int boundary_threshold=3;
-
+    float intersect_threshold=2.01e-18;
 
     //call detection model and movenet model intepreter so the two interpreter won't be called twice
 
@@ -2643,8 +2954,8 @@ int main(int argc, char **argv) {
     movenet_interpreter->AllocateTensors();
     //end of movenet model
 
-    std::string left_dir = "./test_one/left/";
-    std::string right_dir = "./test_one/right/";
+    std::string left_dir = "./full/left/";
+    std::string right_dir = "./full/right/";
     std::string output_folder = "./output/";
 
     // Get list of files in left directory
@@ -2656,6 +2967,14 @@ int main(int argc, char **argv) {
     }
     std::sort(left_files.begin(), left_files.end(), sortNumerically);
 
+
+    //collect valid frames
+    std::vector<std::string> valid_frames_names;
+
+    //collect valid vectors
+    std::vector<Frame> valid_frames;
+
+
     for (const auto& file_name : left_files) {
         // Replace 'left' with 'right' in the filename
         std::string right_file_name = std::regex_replace(file_name, std::regex("left"), "right");
@@ -2663,7 +2982,7 @@ int main(int argc, char **argv) {
         std::string left_file_path = left_dir + file_name;
         std::string right_file_path = right_dir + right_file_name;
 
-        std::cout << left_file_path << right_file_path << std::endl;
+        std::cout << "-----------"<< left_file_path << right_file_path << std::endl;
 
         // Check if the corresponding right file exists
         if (fs::exists(right_file_path)) {
@@ -2671,21 +2990,83 @@ int main(int argc, char **argv) {
             cv::Mat frameL = cv::imread(right_file_path);
 
 
-            Frame frame=process_eachframe(detection_interpreter, movenet_interpreter, left_file_path, right_file_path);
-            std::cout << "---------This frame is: " << std::endl;
+            Frame frame=process_eachframe(detection_interpreter, movenet_interpreter, left_file_path, right_file_path, output_folder);
+            // std::cout << "---------This frame is: " << std::endl;
             frame.printMeanAndRange();
+
+
+            //check if it is empty, also add the file name
+            if (!frame.isEmpty()) {
+                
+                valid_frames_names.push_back(file_name);
+
+                valid_frames.push_back(frame);
+
+            }
+
+
 
         }
     }
 
+    //valid frame string
+    std::cout << "Valid Frames:" << std::endl;
+    for (const std::string& frame : valid_frames_names) {
+        std::cout << frame << " ";
+    }    
+
+    // std::cout<< "--------------" << std::endl;
+    // printListOfFrames(valid_frames);
+
+
+    std::vector<std::pair<size_t, size_t>> pair_index;
+    //this block is just to get the pair
+    if (valid_frames.size() < 1) {
+        std::cout << "no enough valid frames" << std::endl;
+    } else {
+        std::vector<float> adjacent_result;
+        for (size_t i = 0; i < valid_frames.size() - 1; ++i) {
+            adjacent_result.push_back(intersect(valid_frames[i].mean_local, valid_frames[i + 1].mean_local, valid_frames[i].range_local, valid_frames[i + 1].range_local, distri, map_probs));
+        }
+
+        std::cout << "Adjacent Result: ";
+        for (const auto& val : adjacent_result) {
+            std::cout << val << " ";
+        }
+        std::cout << std::endl;
+
+        std::vector<size_t> indices_sorted(adjacent_result.size());
+        std::iota(indices_sorted.begin(), indices_sorted.end(), 0);
+        std::sort(indices_sorted.begin(), indices_sorted.end(), [&](size_t i, size_t j) { return adjacent_result[i] > adjacent_result[j]; });
+
+        
+        for (auto i : indices_sorted) {
+            pair_index.push_back({i, i + 1});
+        }
+
+        std::cout << "Pair Index: ";
+        for (const auto& pair : pair_index) {
+            std::cout << "(" << pair.first << ", " << pair.second << ") ";
+        }
+        std::cout << std::endl;
+    }
+    //end of getting the pair block
+
+    std::cout << "----------" << std::endl;
+
+
+    // printListOfFrames(valid_frames);
+
+    //passing the frames to the local_database
+    std::vector<Frame> local_database = process_frames(valid_frames, pair_index, intersect_threshold, boundary_threshold, distri, map_probs );
 
 
 
-    // // Output the distances
-    // for (const auto& distance : distances) {
-    //     std::cout << distance << " ";
-    // }   
-    // std::cout << std::endl;
+    // Print the contents of local_database
+    for (const auto& frame : local_database) {
+        frame.printDetails();
+        std::cout << "------------------" << std::endl;
+    }
 
 
     return 0;
