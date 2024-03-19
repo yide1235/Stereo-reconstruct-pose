@@ -1,3 +1,10 @@
+#### Status:
+## C++ version is seperated into files with hpp and cpp
+## python one is cleaned 
+## Both are working version
+
+## Next step is substitute the ssim algo.
+
 ## export LD_LIBRARY_PATH=/content/conda-env/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
 
 # for C++ version,
