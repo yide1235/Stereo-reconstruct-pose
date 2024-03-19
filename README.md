@@ -1,7 +1,7 @@
 #### Status:
-## C++ version is seperated into files with hpp and cpp
-## python one is cleaned 
-## Both are working version
+C++ version is seperated into files with hpp and cpp
+python one is cleaned 
+Both are working version
 
 ## Next step is substitute the ssim algo.
 
