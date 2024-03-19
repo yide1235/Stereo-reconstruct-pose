@@ -1,4 +1,4 @@
-#### Status:
+## Status:
 C++ version is seperated into files with hpp and cpp
 python one is cleaned 
 Both are working version
@@ -7,7 +7,7 @@ Next step is substitute the ssim algo.
 
 export LD_LIBRARY_PATH=/content/condaenv/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
 
-# for C++ version,
+for C++ version,
 current only works with opencv4.8.1 now
 so need to compile opencv 4.8.1 at this two:
 opencv:/home/myd/Desktop/Stereo-reconstruct-C++/tflite/pose_stereovision/build
