@@ -76,6 +76,7 @@
         "csetjmp": "cpp",
         "regex": "cpp",
         "*.ipp": "cpp",
-        "filesystem": "cpp"
+        "filesystem": "cpp",
+        "charconv": "cpp"
     }
 }
