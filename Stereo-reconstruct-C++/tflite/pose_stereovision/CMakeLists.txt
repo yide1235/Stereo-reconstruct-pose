@@ -11,7 +11,7 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 # TensorFlow Lite Integration
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../tflite-dist/include/)
 # add_executable(${PROJECT_NAME} main.cpp)
-add_executable(${PROJECT_NAME} main.cpp lib/intersection.cpp detection/detection.cpp movenet/movenet.cpp lib/triangulation.cpp lib/post_processing.cpp)
+add_executable(${PROJECT_NAME} main.cpp lib/intersection.cpp detection/detection.cpp movenet/movenet.cpp lib/triangulation.cpp lib/post_processing.cpp deep_ssim/ImageCompare.cpp)
 
 
 if(UNIX AND NOT APPLE)

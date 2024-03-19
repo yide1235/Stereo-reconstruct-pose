@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <numeric>
 #include <regex>
+#include <utility> 
 
 #include "opencv481.h"
 
@@ -26,16 +27,17 @@
 #include "movenet/movenet.hpp"
 #include "lib/triangulation.hpp"
 #include "lib/post_processing.hpp"
+#include "deep_ssim/ImageCompare.hpp"
 
 using namespace std;
 using namespace cv;
 using namespace tflite;
-// ns
-using TfLiteDelegatePtr = tflite::Interpreter::TfLiteDelegatePtr;
-// ns
-using TfLiteDelegatePtrMap = std::map<std::string, TfLiteDelegatePtr>;
+namespace fs = std::filesystem;
 
-typedef cv::Point3_<float> Pixel;
+// using TfLiteDelegatePtr = tflite::Interpreter::TfLiteDelegatePtr;
+// using TfLiteDelegatePtrMap = std::map<std::string, TfLiteDelegatePtr>;
+
+// typedef cv::Point3_<float> Pixel;
 
 
 
@@ -47,7 +49,7 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
 {
 
 
-    float movenet_threshold=0.2;
+    float movenet_threshold=0.3;
     float detection_threshold=0.57;
     int loop_theshold=8;
     float variance_threshold=3;
@@ -86,7 +88,7 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     std::string stereo_file = "../cam_config/stereo_cam.yml";
 
     // Call the function and get the camera configuration
-    std::map<std::string, cv::Mat> camera_config = get_stereo_coefficients(stereo_file);
+    std::map<std::string, cv::Mat> camera_config = get_stereo_coefficients();
 
     cv::Mat imgL = cv::imread(imgf1);
     cv::Mat imgR = cv::imread(imgf2);
@@ -337,7 +339,6 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
 //main function
 
 
-namespace fs = std::filesystem;
 
 int main(int argc, char **argv) {
 
@@ -476,6 +477,8 @@ int main(int argc, char **argv) {
 
     return 0;
 }
+
+
 
 
 

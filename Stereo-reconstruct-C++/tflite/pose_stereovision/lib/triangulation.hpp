@@ -13,9 +13,9 @@
 #include "common_types.hpp"
 
 
-bool load_stereo_coefficients(const std::string &filename, cv::Mat &K1, cv::Mat &D1, cv::Mat &K2, cv::Mat &D2, cv::Mat &R, cv::Mat &T, cv::Mat &E, cv::Mat &F, cv::Size &imageSize);
+bool load_stereo_coefficients( cv::Mat &K1, cv::Mat &D1, cv::Mat &K2, cv::Mat &D2, cv::Mat &R, cv::Mat &T, cv::Mat &E, cv::Mat &F, cv::Size &imageSize);
 
-std::map<std::string, cv::Mat> get_stereo_coefficients(const std::string &stereo_file, bool rectify = true);
+std::map<std::string, cv::Mat> get_stereo_coefficients(bool rectify = true);
 
 cv::Mat get_3dpoints(const cv::Mat& disparity, const cv::Mat& Q, float scale = 1.0f);
 

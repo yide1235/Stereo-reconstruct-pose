@@ -43,7 +43,7 @@
 
 
 
-bool load_stereo_coefficients(const std::string &filename, cv::Mat &K1, cv::Mat &D1, cv::Mat &K2, cv::Mat &D2, cv::Mat &R, cv::Mat &T, cv::Mat &E, cv::Mat &F, cv::Size &imageSize) {
+bool load_stereo_coefficients(cv::Mat &K1, cv::Mat &D1, cv::Mat &K2, cv::Mat &D2, cv::Mat &R, cv::Mat &T, cv::Mat &E, cv::Mat &F, cv::Size &imageSize) {
     // Directly setting the imageSize
     imageSize = cv::Size(1920, 1080);
 
@@ -87,11 +87,11 @@ bool load_stereo_coefficients(const std::string &filename, cv::Mat &K1, cv::Mat 
 
 
 
-std::map<std::string, cv::Mat> get_stereo_coefficients(const std::string &stereo_file, bool rectify) {
+std::map<std::string, cv::Mat> get_stereo_coefficients(bool rectify) {
     cv::Mat K1, D1, K2, D2, R, T, E, F, R1, R2, P1, P2, Q;
     cv::Size size;
 
-    if (!load_stereo_coefficients(stereo_file, K1, D1, K2, D2, R, T, E, F, size)) {
+    if (!load_stereo_coefficients( K1, D1, K2, D2, R, T, E, F, size)) {
         std::cerr << "Error loading stereo coefficients from file" << std::endl;
         exit(EXIT_FAILURE);
     }
