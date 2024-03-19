@@ -43,7 +43,7 @@
 
 
 
-bool load_stereo_coefficients(cv::Mat &K1, cv::Mat &D1, cv::Mat &K2, cv::Mat &D2, cv::Mat &R, cv::Mat &T, cv::Mat &E, cv::Mat &F, cv::Size &imageSize) {
+bool load_stereo_coefficients(cv::Mat &K1, cv::Mat &D1, cv::Mat &K2, cv::Mat &D2, cv::Mat &R, cv::Mat &T, cv::Mat &E, cv::Mat &F, cv::Size &imageSize, cv::Mat &R1, cv::Mat &R2, cv::Mat &P1, cv::Mat &P2) {
     // Directly setting the imageSize
     imageSize = cv::Size(1920, 1080);
 
@@ -76,7 +76,27 @@ bool load_stereo_coefficients(cv::Mat &K1, cv::Mat &D1, cv::Mat &K2, cv::Mat &D2
                                     -0.0027659788435589125, -6.5794721767472492e-06,
                                      5.6347022084445707e-07, 0.070502675815116850,
                                      0.0026782294092082635, -0.070697504134509911, 1.0);
-                                     
+
+    R1 = (cv::Mat_<double>(3, 3) << 9.8899513056583044e-01, -1.0475489742660323e-02,
+                                    1.4757674556557776e-01, 1.1423590479496794e-02,
+                                     9.9991918862838236e-01, -5.5783324851059182e-03,
+                                    -1.4750638392162088e-01, 7.2027999700849986e-03,
+                                    9.8903487621769848e-01 );
+
+    R2 = (cv::Mat_<double>(3, 3) << 9.8860370229023509e-01, -1.3293925654001493e-02,
+                                    1.4995329725866638e-01, 1.2329967738383298e-02,
+                                    9.9989692295456167e-01, 7.3563144012436668e-03,
+                                    -1.5003563481256882e-01, -5.4235603348169025e-03,
+                                    9.8866571361592381e-01);
+
+    P1 = (cv::Mat_<double>(3, 3) << 9.2283355120090550e+02, 0., 6.6143807220458984e+02, 0., 0.,
+       9.2283355120090550e+02, 5.2272535324096680e+02, 0., 0., 0., 1.,
+       0. );
+
+    P2 = (cv::Mat_<double>(3, 3) << 9.2283355120090550e+02, 0., 6.6143807220458984e+02,
+       -6.1927712815886553e+04, 0., 9.2283355120090550e+02,
+       5.2272535324096680e+02, 0., 0., 0., 1., 0.);
+
     return true;
 }
 
@@ -91,7 +111,7 @@ std::map<std::string, cv::Mat> get_stereo_coefficients(bool rectify) {
     cv::Mat K1, D1, K2, D2, R, T, E, F, R1, R2, P1, P2, Q;
     cv::Size size;
 
-    if (!load_stereo_coefficients( K1, D1, K2, D2, R, T, E, F, size)) {
+    if (!load_stereo_coefficients( K1, D1, K2, D2, R, T, E, F, size, R1, R2, P1, P2)) {
         std::cerr << "Error loading stereo coefficients from file" << std::endl;
         exit(EXIT_FAILURE);
     }
@@ -106,6 +126,11 @@ std::map<std::string, cv::Mat> get_stereo_coefficients(bool rectify) {
     config["E"] = E;
     config["F"] = F;
     config["size"] = cv::Mat(1, 2, CV_32SC1, cv::Scalar(size.width, size.height));
+    config["R1"] =R1;
+    config["R2"] = R2;
+    config["P1"] = P1;
+    config["P2"] = P2;
+
 
 
 

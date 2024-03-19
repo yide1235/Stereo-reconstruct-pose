@@ -13,7 +13,7 @@
 #include "common_types.hpp"
 
 
-bool load_stereo_coefficients( cv::Mat &K1, cv::Mat &D1, cv::Mat &K2, cv::Mat &D2, cv::Mat &R, cv::Mat &T, cv::Mat &E, cv::Mat &F, cv::Size &imageSize);
+bool load_stereo_coefficients( cv::Mat &K1, cv::Mat &D1, cv::Mat &K2, cv::Mat &D2, cv::Mat &R, cv::Mat &T, cv::Mat &E, cv::Mat &F, cv::Size &imageSize, cv::Mat &R1, cv::Mat &R2, cv::Mat &P1, cv::Mat &P2);
 
 std::map<std::string, cv::Mat> get_stereo_coefficients(bool rectify = true);
 

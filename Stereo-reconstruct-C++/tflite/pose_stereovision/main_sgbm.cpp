@@ -39,7 +39,7 @@ namespace fs = std::filesystem;
 
 //main function
 //****************************************
-Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_interpreter, const std::unique_ptr<tflite::Interpreter>& movenet_interpreter, const std::unique_ptr<tflite::Interpreter>& feature_interpreter, const std::string& imgf1,  const std::string& imgf2, const std::string& output_folder)
+Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_interpreter, const std::unique_ptr<tflite::Interpreter>& movenet_interpreter,  const std::string& imgf1,  const std::string& imgf2, const std::string& output_folder)
 {
 
 
@@ -79,7 +79,7 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
         return Frame();
     }
 
-
+    std::string stereo_file = "../cam_config/stereo_cam.yml";
 
     // Call the function and get the camera configuration
     std::map<std::string, cv::Mat> camera_config = get_stereo_coefficients();
@@ -91,8 +91,6 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     // Rectify the images
     auto [rectifiedL, rectifiedR] = get_rectify_image(imgL, imgR, camera_config);
 
-    ImageCompare cmp(rectifiedL, rectifiedR);
-
 
     std::vector<std::vector<float>> results1 = detection_process(detection_interpreter,rectifiedL, detection_threshold);
 
@@ -100,49 +98,48 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     //*****************************************
     //start to get the 3d depth
 
-    // cv::Mat grayL, grayR;
-    // cv::cvtColor(rectifiedL, grayL, cv::COLOR_BGR2GRAY);
-    // cv::cvtColor(rectifiedR, grayR, cv::COLOR_BGR2GRAY);
+    cv::Mat grayL, grayR;
+    cv::cvtColor(rectifiedL, grayL, cv::COLOR_BGR2GRAY);
+    cv::cvtColor(rectifiedR, grayR, cv::COLOR_BGR2GRAY);
 
-    // cv::Mat grayL_copy=grayL.clone();
-    // cv::Mat grayR_copy=grayR.clone();
+    cv::Mat grayL_copy=grayL.clone();
+    cv::Mat grayR_copy=grayR.clone();
 
 
-    // cv::Mat dispL = get_filter_disparity(grayL_copy, grayR_copy, true);
+    cv::Mat dispL = get_filter_disparity(grayL_copy, grayR_copy, true);
 
 
     // ***** the disparity is correct
 
     // Convert the disparity map to 3D points
     cv::Mat Q = camera_config["Q"];
-
-    // cv::Mat points_3d = get_3dpoints(dispL, Q);
-
-
-    // if (points_3d.empty()) {
-    //     std::cerr << "Error: points_3d matrix is empty." << std::endl;
-    //     return Frame();
-    // }
-
-    // if (points_3d.type() != CV_32FC3) {
-    //     std::cerr << "Error: points_3d matrix is not of type CV_32FC3." << std::endl;
-    //     return Frame();
-    // }
-
-    // if (points_3d.channels() != 3) {
-    //     std::cerr << "Error: points_3d does not have 3 channels." << std::endl;
-    //     return Frame();
-    // }
-
-    // std::vector<cv::Mat> channels;
-    // cv::split(points_3d, channels);
-    // cv::Mat x = channels[0];
-    // cv::Mat y = channels[1];
-    // cv::Mat depth = channels[2];
+    cv::Mat points_3d = get_3dpoints(dispL, Q);
 
 
-    // // xyz_coord is the same as points_3d
-    // cv::Mat xyz_coord = points_3d; 
+    if (points_3d.empty()) {
+        std::cerr << "Error: points_3d matrix is empty." << std::endl;
+        return Frame();
+    }
+
+    if (points_3d.type() != CV_32FC3) {
+        std::cerr << "Error: points_3d matrix is not of type CV_32FC3." << std::endl;
+        return Frame();
+    }
+
+    if (points_3d.channels() != 3) {
+        std::cerr << "Error: points_3d does not have 3 channels." << std::endl;
+        return Frame();
+    }
+
+    std::vector<cv::Mat> channels;
+    cv::split(points_3d, channels);
+    cv::Mat x = channels[0];
+    cv::Mat y = channels[1];
+    cv::Mat depth = channels[2];
+
+
+    // xyz_coord is the same as points_3d
+    cv::Mat xyz_coord = points_3d; 
 
 
 
@@ -206,43 +203,17 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
 
             
 
-            // // Clamp tempx and tempy to the valid range of the points_3d matrix
-            // tempx = std::max(0, std::min(tempx, points_3d.cols - 1));
-            // tempy = std::max(0, std::min(tempy, points_3d.rows - 1));
+            // Clamp tempx and tempy to the valid range of the points_3d matrix
+            tempx = std::max(0, std::min(tempx, points_3d.cols - 1));
+            tempy = std::max(0, std::min(tempy, points_3d.rows - 1));
 
-            std::pair<int, int> result_point = cmp.search_image(feature_interpreter, tempx, tempy, 224, 224);
-
-            // Convert points from pixel coordinates to normalized camera coordinates
-            std::vector<cv::Point2f> pts_left = {{tempx, tempy}};
-            std::vector<cv::Point2f> pts_right = {{result_point.first, result_point.second}};
-            std::vector<cv::Point2f> pts_left_undistorted, pts_right_undistorted;
-
-            cv::undistortPoints(pts_left, pts_left_undistorted, camera_config["K1"], camera_config["D1"], camera_config["R1"], camera_config["P1"]);
-            cv::undistortPoints(pts_right, pts_right_undistorted, camera_config["K2"], camera_config["D2"], camera_config["R2"], camera_config["P2"]);
-
-            // Perform triangulation
-            cv::Mat points4D;
-            cv::triangulatePoints(camera_config["P1"], camera_config["P2"], pts_left_undistorted, pts_right_undistorted, points4D);
-
-            // Convert from homogeneous coordinates to 3D coordinates
-            cv::Mat points3D;
-            cv::convertPointsFromHomogeneous(points4D.t(), points3D);
-
-            // Access the 3D coordinates
-            cv::Vec3f point3d = points3D.at<cv::Vec3f>(0);
+            
+            // Access the 3D point at (tempx, tempy)
+            cv::Vec3f point3d = points_3d.at<cv::Vec3f>(tempy, tempx);
 
             // Store the 3D point
             depth_3d.push_back(point3d);
         }
-
-
-        // for (const auto& point : depth_3d) {
-        //     std::cout << "3D Point: x = " << point[0] << ", y = " << point[1] << ", z = " << point[2] << std::endl;
-        // }
-
-        // std::cout << "----------" << std::endl;
-
-        // assert (0==1);
 
         cv::Vec3f sixthElement = depth_3d[5];
 
@@ -402,23 +373,6 @@ int main(int argc, char **argv) {
     movenet_interpreter->AllocateTensors();
     //end of movenet model
 
-
-    //for feature extractor model
-    std::unique_ptr<tflite::FlatBufferModel> feature_model =
-    tflite::FlatBufferModel::BuildFromFile("../deep_ssim/mobilenetv2_quant_int8.tflite");
-
-    //   auto ext_delegate_option = TfLiteExternalDelegateOptionsDefault("/usr/lib/libvx_delegate.so");
-    //   auto ext_delegate_ptr = TfLiteExternalDelegateCreate(&ext_delegate_option);
-    tflite::ops::builtin::BuiltinOpResolver feature_resolver;
-    std::unique_ptr<tflite::Interpreter> feature_interpreter;
-    tflite::InterpreterBuilder(*feature_model, feature_resolver)(&feature_interpreter);
-    //   interpreter->ModifyGraphWithDelegate(ext_delegate_ptr);
-    feature_interpreter->SetAllowFp16PrecisionForFp32(false);
-    feature_interpreter->AllocateTensors();
-
-
-
-
     std::string left_dir = "./part/left/";
     std::string right_dir = "./part/right/";
     std::string output_folder = "./output/";
@@ -454,7 +408,7 @@ int main(int argc, char **argv) {
             cv::Mat frameL = cv::imread(right_file_path);
 
 
-            Frame frame=process_eachframe(detection_interpreter, movenet_interpreter, feature_interpreter,left_file_path, right_file_path, output_folder);
+            Frame frame=process_eachframe(detection_interpreter, movenet_interpreter, left_file_path, right_file_path, output_folder);
             frame.printMeanAndRange();
 
             if (!frame.isEmpty()) {
