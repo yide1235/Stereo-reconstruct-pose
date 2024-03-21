@@ -13,7 +13,7 @@ private:
 public:
     ImageCompare(cv::Mat left, cv::Mat right);
 
-    cv::Mat load_image(const std::string& img_path, const cv::Size& size = cv::Size(224, 224));
+    // cv::Mat load_image(const std::string& img_path, const cv::Size& size = cv::Size(224, 224));
     cv::Mat recompute_image(const cv::Mat& img, int x, int y, int box_szx, int box_szy, int model_size);
     cv::Mat get_image(const cv::Mat& image1, int x1, int y1, int width1, int height1, int model_size);
     float calculateNormManually(const cv::Mat& vec);

@@ -31,5 +31,11 @@ std::vector<float> calculateDistances(const std::vector<cv::Vec3f>& depth_3d, co
 
 void printDepth3D(const std::vector<cv::Vec3f>& depth_3d);
 
+cv::Mat triangulatePoint(const cv::Mat& M_r, const cv::Mat& P_l, const cv::Point2f& point_l, const cv::Point2f& point_r);
+
+std::vector<cv::Point3f> triangulatePoints(const cv::Mat& K_l, const cv::Mat& K_r, const cv::Mat& R, const cv::Mat& T,
+                                           const std::vector<std::vector<cv::Point2f>>& uvs_l, const std::vector<std::vector<cv::Point2f>>& uvs_r);
+
+
 #endif // TRIANGULATION_HPP
 

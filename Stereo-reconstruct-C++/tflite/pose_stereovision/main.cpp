@@ -19,7 +19,7 @@
 #include <numeric>
 #include <regex>
 #include <utility> 
-
+#include <chrono>
 #include "opencv481.h"
 
 #include "lib/intersection.hpp"
@@ -35,7 +35,12 @@ using namespace tflite;
 namespace fs = std::filesystem;
 
 
-
+void printPoints(std::vector<cv::Point2f> points, const std::string& name) {
+    std::cout << name << " contains:" << std::endl;
+    for (auto point : points) {
+        std::cout << "(" << point.x << ", " << point.y << ")" << std::endl;
+    }
+}
 
 //main function
 //****************************************
@@ -46,10 +51,12 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     float movenet_threshold=0.3;
     float detection_threshold=0.57;
     int loop_theshold=8;
+    // int loop_theshold=1;
     float variance_threshold=3;
     int required_variance_point=9;
     // double intersect_threshold=2.000001e-7;
     int effective_range=2737;
+    int padding_size=300;
 
 
     std::vector<std::string> coco_names = {
@@ -87,18 +94,51 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     cv::Mat imgL = cv::imread(imgf1);
     cv::Mat imgR = cv::imread(imgf2);
 
+    //add time
+    auto start_rectification = std::chrono::high_resolution_clock::now();
 
     // Rectify the images
     auto [rectifiedL, rectifiedR] = get_rectify_image(imgL, imgR, camera_config);
 
-    ImageCompare cmp(rectifiedL, rectifiedR);
+    auto end_rectification = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<float, std::milli> rectification_duration = end_rectification - start_rectification;
+    std::cout << "Rectification time: " << rectification_duration.count() << " ms" << std::endl;
+
+
+    cv::Mat paddedL, paddedR;
+
+    // add padding for each side, when plug in point, make sure add the padding and minus the padding afterwards
+
+    // 
+    cv::copyMakeBorder(rectifiedL, paddedL, 
+                       padding_size, padding_size, 
+                       padding_size, padding_size,
+                       cv::BORDER_CONSTANT,         
+                       cv::Scalar(0, 0, 0));      
+
+    // 
+    cv::copyMakeBorder(rectifiedR, paddedR, 
+                       padding_size, padding_size, 
+                       padding_size, padding_size, 
+                       cv::BORDER_CONSTANT,         
+                       cv::Scalar(0, 0, 0));        
+
+    ImageCompare cmp(paddedL, paddedR);
+
+    // ImageCompare cmp(rectifiedL, rectifiedR);
+    //add time
+    auto start_detection = std::chrono::high_resolution_clock::now();
 
 
     std::vector<std::vector<float>> results1 = detection_process(detection_interpreter,rectifiedL, detection_threshold);
 
+    auto end_detection = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<float, std::milli> detection_duration = end_detection - start_detection;
+    std::cout << "detection time: " << detection_duration.count() << " ms" << std::endl;
 
-    //*****************************************
-    //start to get the 3d depth
+
+    ////*****************************************start of the sgbm code, not used now
+    ////start to get the 3d depth
 
     // cv::Mat grayL, grayR;
     // cv::cvtColor(rectifiedL, grayL, cv::COLOR_BGR2GRAY);
@@ -114,7 +154,8 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     // ***** the disparity is correct
 
     // Convert the disparity map to 3D points
-    cv::Mat Q = camera_config["Q"];
+
+    // cv::Mat Q = camera_config["Q"];
 
     // cv::Mat points_3d = get_3dpoints(dispL, Q);
 
@@ -144,13 +185,35 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     // // xyz_coord is the same as points_3d
     // cv::Mat xyz_coord = points_3d; 
 
+    // //**************************this part of code is using sgbm to get the disparity then to get the full3d, if 
+    // //you want to use, you also need to uncomment the code in lib/triangulation to do this
+
 
 
     //*****************************************
     //this is for movenet
 
+
+    // for the vectexs, there are 17 points in total for the person, the frist 5, index 0~4 is nose, left eye, right eye, left ear, right ear, ignore for now
+    // the vec_inds is the edge that two vectex should be the index of this:
+    // index 5:left shoulder
+    // index 6:right shoulder
+    // index 7:left elbow
+    // index 8:right elbow
+    // index 9:left hand
+    // index 10:right hand
+    // index 11:left hip
+    // index 12:right hip
+    // index 13:left knee
+    // index 14:right knee
+    // index 15:left foot
+    // index 16:right foot
+
+    // so the vec_inds represents: 
+    //  shoulder    right_upper_arm    right_lower_arm    left_upper_arm    left_lower_arm    right_upper_leg    right_lower_leg    left_upper_leg    left_lower_leg    right_shoulder_hip   left_shoulder_hip     hip
+
     std::vector<std::vector<int>> vec_inds = {
-        {6, 5}, {6, 8}, {8, 10}, {5, 7}, {7, 9}, {12, 14}, {14, 16}, {11, 13}, {13, 15}, {6, 12}, {5, 11}, {12, 11}
+        {6, 5},         {6, 8},            {8, 10},          {5, 7},             {7, 9},          {12, 14},          {14, 16},          {11, 13},         {13, 15},         {6, 12},            {5, 11},         {12, 11}
     };
 
     std::vector<float> box1;
@@ -166,19 +229,41 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     cv::Rect cropRect(x1, y1, x2 - x1, y2 - y1);
     cv::Mat crop1 = rectifiedL(cropRect);
 
+    //add time
+    auto start_movenet = std::chrono::high_resolution_clock::now();
 
     std::vector<std::vector<Keypoint>> left=process_movenet_augmentation(movenet_interpreter, crop1, movenet_threshold, loop_theshold, true);
+
+
+    auto end_movenet = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<float, std::milli> movenet_duration = end_movenet - start_movenet;
+    std::cout << "movenet time: " << movenet_duration.count() << " ms" << std::endl;
+
+
+
+
 
     std::vector<std::vector<float>> list_of_mag;
 
     cv::Mat rectifiedL_copy=rectifiedL.clone();
+    cv::Mat rectifiedR_copy=rectifiedR.clone();
+
 
     std::vector<float> right_shoulder;
 
+    std::vector<std::vector<Keypoint>> left_2d;
+    std::vector<std::vector<Keypoint>> right_2d;
+
     for (int i=0;i< left.size();i++){
+
+        //add time
+        std::cout << "For this augmentation, the deep ssim and triangulation takes: " << std::endl;
+
+        auto start_deepssim_and_triangulation_per_aug = std::chrono::high_resolution_clock::now();
 
 
         std::vector<Keypoint> left_converted;
+        std::vector<Keypoint> right_converted;
 
         for (const auto& point : left[i]) {
             // cv::Point center(static_cast<int>(point.x), static_cast<int>(point.y));
@@ -190,6 +275,7 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
             Keypoint temp={x_adj, y_adj};
             left_converted.push_back(temp);
         }
+        left_2d.push_back(left_converted);
 
 
         //end of movenet
@@ -197,6 +283,21 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
         //*****************************************
         //start to use the result of movenet to get the 3d point
 
+        // auto start = std::chrono::high_resolution_clock::now(); // Start timing before the loop
+
+        cv::Mat H1=camera_config["H1"];
+        cv::Mat H2=camera_config["H2"];
+
+        cv::Mat H1_inverse;
+        cv::invert(H1, H1_inverse, cv::DECOMP_LU);  
+        cv::Mat H2_inverse;
+        cv::invert(H2, H2_inverse, cv::DECOMP_LU);
+
+        cv::Mat K1=camera_config["K1"];
+        cv::Mat K2=camera_config["K2"];
+
+        cv::Mat R=camera_config["R"];
+        cv::Mat T=camera_config["T"];
 
         std::vector<cv::Vec3f> depth_3d;
 
@@ -204,36 +305,80 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
             int tempx = static_cast<int>(keypoint.x);
             int tempy = static_cast<int>(keypoint.y);
 
-            
 
             // // Clamp tempx and tempy to the valid range of the points_3d matrix
             // tempx = std::max(0, std::min(tempx, points_3d.cols - 1));
             // tempy = std::max(0, std::min(tempy, points_3d.rows - 1));
+            // std::cout << tempx <<" " << tempy << std::endl;
+
+            
+
+            //should calculate on the padding
+            tempx+=padding_size;
+            tempy+=padding_size;
 
             std::pair<int, int> result_point = cmp.search_image(feature_interpreter, tempx, tempy, 224, 224);
 
-            // Convert points from pixel coordinates to normalized camera coordinates
-            std::vector<cv::Point2f> pts_left = {{tempx, tempy}};
-            std::vector<cv::Point2f> pts_right = {{result_point.first, result_point.second}};
-            std::vector<cv::Point2f> pts_left_undistorted, pts_right_undistorted;
+            //minus padding to get the position on original
+            result_point.first -= padding_size;
+            result_point.second -= padding_size;
 
-            cv::undistortPoints(pts_left, pts_left_undistorted, camera_config["K1"], camera_config["D1"], camera_config["R1"], camera_config["P1"]);
-            cv::undistortPoints(pts_right, pts_right_undistorted, camera_config["K2"], camera_config["D2"], camera_config["R2"], camera_config["P2"]);
+            // add the point to right 2d for drawing purpose
+            Keypoint temp_right={static_cast<float>(result_point.first), static_cast<float>(result_point.second)};
+            right_converted.push_back(temp_right);
 
-            // Perform triangulation
-            cv::Mat points4D;
-            cv::triangulatePoints(camera_config["P1"], camera_config["P2"], pts_left_undistorted, pts_right_undistorted, points4D);
 
-            // Convert from homogeneous coordinates to 3D coordinates
-            cv::Mat points3D;
-            cv::convertPointsFromHomogeneous(points4D.t(), points3D);
 
-            // Access the 3D coordinates
-            cv::Vec3f point3d = points3D.at<cv::Vec3f>(0);
+            // // tempx tempy is left point, result_point.first result_point.second is right point
 
-            // Store the 3D point
-            depth_3d.push_back(point3d);
+            cv::Point2f p1(static_cast<float>(tempx), static_cast<float>(tempy));
+
+            cv::Point2i p2(result_point.first, result_point.second);
+
+            cv::Mat p1_mat = (cv::Mat_<double>(3, 1) << p1.x, p1.y, 1.0f);
+            cv::Mat pp1_mat = H1_inverse * p1_mat;
+            cv::Point2f pp1(pp1_mat.at<double>(0) / pp1_mat.at<double>(2), pp1_mat.at<double>(1) / pp1_mat.at<double>(2));
+        
+            cv::Mat p2_mat = (cv::Mat_<double>(3, 1) << p2.x, p2.y, 1.0f);
+            cv::Mat pp2_mat = H2_inverse * p2_mat;
+            cv::Point2f pp2(pp2_mat.at<double>(0) / pp2_mat.at<double>(2), pp2_mat.at<double>(1) / pp2_mat.at<double>(2));
+
+            std::vector<std::vector<cv::Point2f>> tp2(1, std::vector<cv::Point2f>(1, pp2));
+            std::vector<std::vector<cv::Point2f>> tp1(1, std::vector<cv::Point2f>(1, pp1));
+
+            // std::cout<<"tps:"<<std::endl<<pp1<<pp2<<std::endl<<std::endl;
+
+            std::vector<cv::Point3f> finalResult = triangulatePoints(K1, K2, R, T, tp1, tp2);
+
+            // std::cout << "-----" <<std::endl;
+
+            // for(const auto& point : finalResult) {
+            //     std::cout << "(" << point.x << ", " << point.y << ", " << point.z << ")" << std::endl;
+            // }       
+
+            
+
+            assert (1==finalResult.size() );
+
+
+            if (!finalResult.empty()) {
+                // Convert the first cv::Point3f to cv::Vec3f and add it to depth_3d
+                const cv::Point3f& firstPoint = finalResult.front(); // Get the first point
+                cv::Vec3f convertedVec(firstPoint.x, firstPoint.y, firstPoint.z); // Convert to cv::Vec3f
+                depth_3d.push_back(convertedVec); // Add to depth_3d
+            } else {
+                std::cout << "finalResult is empty!" << std::endl;
+            }
+
+
         }
+
+        right_2d.push_back(right_converted);
+
+
+
+
+
 
 
         // for (const auto& point : depth_3d) {
@@ -241,6 +386,8 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
         // }
 
         // std::cout << "----------" << std::endl;
+
+
 
         // assert (0==1);
 
@@ -256,8 +403,57 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
         list_of_mag.push_back(distances);
 
 
+    auto end_deepssim_and_triangulation_per_aug = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<float, std::milli> deepssim_and_triangulation_per_aug_duration = end_deepssim_and_triangulation_per_aug - start_deepssim_and_triangulation_per_aug;
+    std::cout << "deepssim_and_triangulation_per_aug time: " << deepssim_and_triangulation_per_aug_duration.count() << " ms" << std::endl;
+
+
+
 
     }
+
+
+
+    //this is for the left
+    std::vector<Keypoint> averageKeypoints = calculateAverageKeypoints(left_2d);
+
+    for (int i=5; i< averageKeypoints.size();i++){
+        cv::Point center(static_cast<int>(averageKeypoints[i].x), static_cast<int>(averageKeypoints[i].y));
+        cv::circle(rectifiedL_copy, center, 4, cv::Scalar(0, 255, 0), -1);
+
+    }
+
+
+    std::size_t lastSlashIndex = imgf1.find_last_of("/\\");
+    std::string filename = imgf1.substr(lastSlashIndex + 1); output_folder ;
+
+    std::string outputPath = output_folder  + filename;
+    cv::imwrite(outputPath, rectifiedL_copy);
+
+
+    //this is for the right
+    std::vector<Keypoint> averageKeypoints_right = calculateAverageKeypoints(right_2d);
+
+    for (int i=5; i< averageKeypoints_right.size();i++){
+        cv::Point center(static_cast<int>(averageKeypoints_right[i].x), static_cast<int>(averageKeypoints_right[i].y));
+        cv::circle(rectifiedR_copy, center, 4, cv::Scalar(0, 255, 0), -1);
+
+    }
+
+
+    // std::size_t lastSlashIndex = imgf1.find_last_of("/\\");
+    // std::string filename = imgf1.substr(lastSlashIndex + 1); output_folder ;
+
+    std::string outputPath_right = "./output_right/"  + filename;
+    std::cout << outputPath_right << std::endl;
+    cv::imwrite(outputPath_right, rectifiedR_copy);
+
+
+    //end of drawing
+
+    //add time
+    auto start_post_processing = std::chrono::high_resolution_clock::now();
+
 
     //test effective range
     float sum = std::accumulate(right_shoulder.begin(), right_shoulder.end(), 0.0f);
@@ -270,43 +466,6 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     // std::cout << average << "--" << effective_range << std::endl;
     if(average<effective_range){
 
-        //have to draw the average of 2d pooints to check
-        std::vector<std::vector<Keypoint>> left_2d;
-        for (int i=0;i< left.size();i++){
-
-
-            std::vector<Keypoint> left_converted;
-
-            for (const auto& point : left[i]) {
-                // cv::Point center(static_cast<int>(point.x), static_cast<int>(point.y));
-                // cv::circle(crop1, center, 2, cv::Scalar(0, 255, 0), -1);
-                float x_adj = point.x + std::max(0, static_cast<int>(box1[0] - 0.05 * (box1[2] - box1[0])));
-                float y_adj = point.y + std::max(0, static_cast<int>(box1[1] - 0.05 * (box1[3] - box1[1])));
-
-
-                Keypoint temp={x_adj, y_adj};
-                left_converted.push_back(temp);
-            }
-
-            left_2d.push_back(left_converted);
-
-        }
-
-
-        std::vector<Keypoint> averageKeypoints = calculateAverageKeypoints(left_2d);
-
-        for (int i=5; i< averageKeypoints.size();i++){
-            cv::Point center(static_cast<int>(averageKeypoints[i].x), static_cast<int>(averageKeypoints[i].y));
-            cv::circle(rectifiedL_copy, center, 4, cv::Scalar(0, 255, 0), -1);
-
-        }
-
-
-        std::size_t lastSlashIndex = imgf1.find_last_of("/\\");
-        std::string filename = imgf1.substr(lastSlashIndex + 1); output_folder ;
-
-        std::string outputPath = output_folder  + filename;
-        cv::imwrite(outputPath, rectifiedL_copy);
 
 
         std::vector<std::vector<float>> variance_vector_list;
@@ -354,6 +513,12 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     }
 
 
+    auto end_post_processing = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<float, std::milli> post_processing_duration = end_post_processing - start_post_processing;
+    std::cout << "Rectification time: " << post_processing_duration.count() << " ms" << std::endl;
+
+
+
 }
 
 
@@ -376,6 +541,10 @@ int main(int argc, char **argv) {
 
     int boundary_threshold=3;
     float intersect_threshold=2.01e-18;
+
+
+    
+
 
     std::unique_ptr<tflite::FlatBufferModel> detection_model =
         tflite::FlatBufferModel::BuildFromFile("../detection/yolov8s_integer_quant.tflite");
