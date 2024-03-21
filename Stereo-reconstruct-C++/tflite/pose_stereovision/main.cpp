@@ -48,15 +48,27 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
 {
 
 
+    // float movenet_threshold=0.3;
+    // float detection_threshold=0.57;
+    // int loop_theshold=8;
+    // float variance_threshold=3;
+    // int required_variance_point=9;
+    // // double intersect_threshold=2.000001e-7;
+    // int effective_range=2737;
+    // int padding_size=300;
+
     float movenet_threshold=0.3;
     float detection_threshold=0.57;
-    int loop_theshold=8;
-    // int loop_theshold=1;
-    float variance_threshold=3;
-    int required_variance_point=9;
+    // int loop_theshold=8;
+    int loop_theshold=1;
+    // float variance_threshold=3;
+    float variance_threshold=100;
+    // int required_variance_point=9;
+    int required_variance_point=1;
     // double intersect_threshold=2.000001e-7;
-    int effective_range=2737;
+    int effective_range=10000;
     int padding_size=300;
+
 
 
     std::vector<std::string> coco_names = {
@@ -248,11 +260,17 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     cv::Mat rectifiedL_copy=rectifiedL.clone();
     cv::Mat rectifiedR_copy=rectifiedR.clone();
 
+    cv::Mat left_copy = imgL.clone();
+    cv::Mat right_copy=imgR.clone();
+
 
     std::vector<float> right_shoulder;
 
     std::vector<std::vector<Keypoint>> left_2d;
     std::vector<std::vector<Keypoint>> right_2d;
+
+    std::vector<std::vector<Keypoint>> left_2d_origin;
+    std::vector<std::vector<Keypoint>> right_2d_origin;
 
     for (int i=0;i< left.size();i++){
 
@@ -264,6 +282,10 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
 
         std::vector<Keypoint> left_converted;
         std::vector<Keypoint> right_converted;
+
+        std::vector<Keypoint> left_converted_origin;
+        std::vector<Keypoint> right_converted_origin;
+
 
         for (const auto& point : left[i]) {
             // cv::Point center(static_cast<int>(point.x), static_cast<int>(point.y));
@@ -323,9 +345,16 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
             result_point.first -= padding_size;
             result_point.second -= padding_size;
 
+            tempx-=padding_size;
+            tempy-=padding_size;
+
             // add the point to right 2d for drawing purpose
             Keypoint temp_right={static_cast<float>(result_point.first), static_cast<float>(result_point.second)};
             right_converted.push_back(temp_right);
+
+
+
+            // std::cout << tempx << " " << tempy << " "<< result_point.first << " "<< result_point.second <<std::endl;
 
 
 
@@ -343,8 +372,39 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
             cv::Mat pp2_mat = H2_inverse * p2_mat;
             cv::Point2f pp2(pp2_mat.at<double>(0) / pp2_mat.at<double>(2), pp2_mat.at<double>(1) / pp2_mat.at<double>(2));
 
+
+            // // draw on the origin image
+            Keypoint temp_left_origin={static_cast<float>(pp1_mat.at<double>(0) / pp1_mat.at<double>(2)), static_cast<float>(pp1_mat.at<double>(1) / pp1_mat.at<double>(2))};
+            left_converted_origin.push_back(temp_left_origin);
+
+            
+            Keypoint temp_right_origin={static_cast<float>(pp2_mat.at<double>(0) / pp2_mat.at<double>(2)), static_cast<float>(pp2_mat.at<double>(1) / pp2_mat.at<double>(2))};
+            right_converted_origin.push_back(temp_right_origin);
+
+
+
             std::vector<std::vector<cv::Point2f>> tp2(1, std::vector<cv::Point2f>(1, pp2));
             std::vector<std::vector<cv::Point2f>> tp1(1, std::vector<cv::Point2f>(1, pp1));
+
+
+            // std::cout << "---------------tp1: " << std::endl;
+            // // Iterating through the 2D vector to print each cv::Point2f
+            // for (const auto &innerVec : tp1) {
+            //     for (const auto &point : innerVec) {
+            //         std::cout << "(" << point.x << ", " << point.y << ") ";
+            //     }
+            //     std::cout << std::endl; // New line for each inner vector
+            // }
+
+            // std::cout << "---------------tp2: " << std::endl;
+            // for (const auto &innerVec : tp2) {
+            //     for (const auto &point : innerVec) {
+            //         std::cout << "(" << point.x << ", " << point.y << ") ";
+            //     }
+            //     std::cout << std::endl; // New line for each inner vector
+            // }
+
+            // std::cout  << std::endl;
 
             // std::cout<<"tps:"<<std::endl<<pp1<<pp2<<std::endl<<std::endl;
 
@@ -376,6 +436,8 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
         right_2d.push_back(right_converted);
 
 
+        left_2d_origin.push_back(left_converted_origin);
+        right_2d_origin.push_back(right_converted_origin);
 
 
 
@@ -402,12 +464,37 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
 
         list_of_mag.push_back(distances);
 
+        for (const auto &vec : depth_3d) {
+            std::cout << "(" << vec[0] << ", " << vec[1] << ", " << vec[2] << ")" << std::endl;
+        }
+
+
+    std::cout << "Printing out the signiture: " << std::endl;
+    // Iterating through the 2D vector to print each float
+    for (const auto &innerVec : list_of_mag) {
+        // for (const auto &value : innerVec) {
+        //     std::cout << value << " ";
+        // }
+        // std::cout << std::endl; // New line for each inner vector
+        std::cout << "shoulder: "<< innerVec[0] << std::endl;
+        std::cout << "right_upper_arm: "<< innerVec[1] << std::endl;
+        std::cout << "right_lower_arm: "<< innerVec[2] << std::endl;
+        std::cout << "left_upper_arm: "<< innerVec[3] << std::endl;
+        std::cout << "left_lower_arm: "<< innerVec[4] << std::endl;
+        std::cout << "right_upper_leg: "<< innerVec[5] << std::endl;
+        std::cout << "right_lower_leg: "<< innerVec[6] << std::endl;
+        std::cout << "left_upper_leg: "<< innerVec[7] << std::endl;
+        std::cout << "left_lower_leg: "<< innerVec[8] << std::endl;
+        std::cout << "right_shoulder_hip: "<< innerVec[9] << std::endl;
+        std::cout << "left_shoulder_hip: "<< innerVec[10] << std::endl;
+        std::cout << "hip: "<< innerVec[11] << std::endl;
+    }
+
+
 
     auto end_deepssim_and_triangulation_per_aug = std::chrono::high_resolution_clock::now();
     std::chrono::duration<float, std::milli> deepssim_and_triangulation_per_aug_duration = end_deepssim_and_triangulation_per_aug - start_deepssim_and_triangulation_per_aug;
     std::cout << "deepssim_and_triangulation_per_aug time: " << deepssim_and_triangulation_per_aug_duration.count() << " ms" << std::endl;
-
-
 
 
     }
@@ -448,7 +535,34 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     std::cout << outputPath_right << std::endl;
     cv::imwrite(outputPath_right, rectifiedR_copy);
 
+    // //****** now draw on origin image
 
+    std::vector<Keypoint> averageKeypoints_left_origin = calculateAverageKeypoints(left_2d_origin);
+
+    for (int i=5; i< averageKeypoints_left_origin.size();i++){
+        cv::Point center(static_cast<int>(averageKeypoints_left_origin[i].x), static_cast<int>(averageKeypoints_left_origin[i].y));
+        cv::circle(left_copy, center, 4, cv::Scalar(0, 255, 0), -1);
+
+    }
+
+
+    std::string outputPath_left_origin = "./origin/left/"  + filename;
+    cv::imwrite(outputPath_left_origin, left_copy);
+
+    //for the right origin
+    std::vector<Keypoint> averageKeypoints_right_origin = calculateAverageKeypoints(right_2d_origin);
+
+    for (int i=5; i< averageKeypoints_right_origin.size();i++){
+        cv::Point center(static_cast<int>(averageKeypoints_right_origin[i].x), static_cast<int>(averageKeypoints_right_origin[i].y));
+        cv::circle(right_copy, center, 4, cv::Scalar(0, 255, 0), -1);
+
+    }
+
+
+    std::string outputPath_right_origin = "./origin/right/"  + filename;
+    cv::imwrite(outputPath_right_origin, right_copy);
+
+    
     //end of drawing
 
     //add time
@@ -462,6 +576,8 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     if (!right_shoulder.empty()) {
         average = sum / static_cast<float>(right_shoulder.size());
     }
+
+    Frame frame=Frame();
 
     // std::cout << average << "--" << effective_range << std::endl;
     if(average<effective_range){
@@ -498,28 +614,23 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
             }
         }
 
-        if (count< required_variance_point){
-            return Frame();
+        if (count> required_variance_point){
+            frame=merge(variance_vector_list, imgf1, imgf2);
         }
-        else{
 
-            Frame frame=merge(variance_vector_list, imgf1, imgf2);
-            return frame;
+    }
 
-        }
-    }
-    else{
-        return Frame();
-    }
 
 
     auto end_post_processing = std::chrono::high_resolution_clock::now();
     std::chrono::duration<float, std::milli> post_processing_duration = end_post_processing - start_post_processing;
     std::cout << "Rectification time: " << post_processing_duration.count() << " ms" << std::endl;
 
-
+    return frame;
 
 }
+
+
 
 
 
@@ -588,8 +699,10 @@ int main(int argc, char **argv) {
 
 
 
-    std::string left_dir = "./part/left/";
-    std::string right_dir = "./part/right/";
+    // std::string left_dir = "./part/left/";
+    // std::string right_dir = "./part/right/";
+    std::string left_dir = "./single/left/";
+    std::string right_dir = "./single/right/";
     std::string output_folder = "./output/";
 
     // Get list of files in left directory

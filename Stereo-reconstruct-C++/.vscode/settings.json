@@ -78,6 +78,8 @@
         "*.ipp": "cpp",
         "filesystem": "cpp",
         "charconv": "cpp",
-        "__split_buffer": "cpp"
+        "__split_buffer": "cpp",
+        "*.inc": "cpp",
+        "ios": "cpp"
     }
 }
