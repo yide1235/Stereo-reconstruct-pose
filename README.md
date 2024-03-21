@@ -1,6 +1,6 @@
 ## Status:
-C++ version is seperated into files with hpp and cpp
-python one is cleaned 
+C++ version is predicting with using deep ssim and evan's triangulation
+python one is old method 
 Both are working version
 
 Next step is substitute the ssim algo.
