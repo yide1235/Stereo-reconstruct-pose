@@ -35,28 +35,29 @@ using namespace tflite;
 namespace fs = std::filesystem;
 
 
-void printPoints(std::vector<cv::Point2f> points, const std::string& name) {
-    std::cout << name << " contains:" << std::endl;
-    for (auto point : points) {
-        std::cout << "(" << point.x << ", " << point.y << ")" << std::endl;
-    }
-}
 
-//main function
-//****************************************
-Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_interpreter, const std::unique_ptr<tflite::Interpreter>& movenet_interpreter, const std::unique_ptr<tflite::Interpreter>& feature_interpreter, const std::string& imgf1,  const std::string& imgf2, const std::string& output_folder)
+
+// //main function, this function is for processing each frame, the parameter of number of augmentation can be passed by here
+// //this function returns a Frame object(basically store the mean, range, parts(like the collection for each human parts))
+// //****************************************
+Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_interpreter, const std::unique_ptr<tflite::Interpreter>& movenet_interpreter, const std::unique_ptr<tflite::Interpreter>& feature_interpreter, const std::string& imgf1,  const std::string& imgf2, bool draw)
 {
 
-
-    // float movenet_threshold=0.3;
+    
+    // float movenet_threshold=0.3;        
     // float detection_threshold=0.57;
-    // int loop_theshold=8;
-    // float variance_threshold=3;
-    // int required_variance_point=9;
-    // // double intersect_threshold=2.000001e-7;
+    // int loop_theshold=8;                             // //this is how many augmentation used
+    // float variance_threshold=3;                       // //this is the threshold for the variance
+    // int required_variance_point=9;                     // //this is for how many good point, like less than the variance threshold is needed
+    // // double intersect_threshold=2.000001e-7;           // //for the matching threshold for the distribution post processing algo
     // int effective_range=2737;
-    // int padding_size=300;
+    // int padding_size=300;                                // //for the feature extractor, padding each side, and minus the padding after got the coord
 
+
+    // //the top one is the parameter from sgbm depth prediction, if replaced by the feature extractor and evan's triangulation,
+    // //the parameter should be updated
+
+    
     float movenet_threshold=0.3;
     float detection_threshold=0.57;
     // int loop_theshold=8;
@@ -70,7 +71,7 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     int padding_size=300;
 
 
-
+    // //coco name 80 classes
     std::vector<std::string> coco_names = {
         "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
         "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog",
@@ -100,16 +101,17 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
 
 
 
-    // Call the function and get the camera configuration
+    // //Call the function and get the camera configuration, now it is in hardcoded constant,
+    // //current K1 K2 D1 D2 R T is from Edward's calibration code, the H1 H2 is using Evan's original calibration
     std::map<std::string, cv::Mat> camera_config = get_stereo_coefficients();
 
     cv::Mat imgL = cv::imread(imgf1);
     cv::Mat imgR = cv::imread(imgf2);
 
-    //add time
+    // //add time
     auto start_rectification = std::chrono::high_resolution_clock::now();
 
-    // Rectify the images
+    // //Rectify the images, current using Evan's rectification , using H1 H2 to get the image rectified
     auto [rectifiedL, rectifiedR] = get_rectify_image(imgL, imgR, camera_config);
 
     auto end_rectification = std::chrono::high_resolution_clock::now();
@@ -119,22 +121,23 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
 
     cv::Mat paddedL, paddedR;
 
-    // add padding for each side, when plug in point, make sure add the padding and minus the padding afterwards
+    // //add padding for each side, when plug in point, make sure add the padding and minus the padding afterwards
 
-    // 
+    // //this is the padding for each side
     cv::copyMakeBorder(rectifiedL, paddedL, 
                        padding_size, padding_size, 
                        padding_size, padding_size,
                        cv::BORDER_CONSTANT,         
                        cv::Scalar(0, 0, 0));      
 
-    // 
+    // //same each side
     cv::copyMakeBorder(rectifiedR, paddedR, 
                        padding_size, padding_size, 
                        padding_size, padding_size, 
                        cv::BORDER_CONSTANT,         
                        cv::Scalar(0, 0, 0));        
 
+    // //
     ImageCompare cmp(paddedL, paddedR);
 
     // ImageCompare cmp(rectifiedL, rectifiedR);
@@ -149,8 +152,8 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     std::cout << "detection time: " << detection_duration.count() << " ms" << std::endl;
 
 
-    ////*****************************************start of the sgbm code, not used now
-    ////start to get the 3d depth
+    // //*****************************************start of the sgbm code, not used now
+    // //start to get the 3d depth
 
     // cv::Mat grayL, grayR;
     // cv::cvtColor(rectifiedL, grayL, cv::COLOR_BGR2GRAY);
@@ -199,51 +202,59 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
 
     // //**************************this part of code is using sgbm to get the disparity then to get the full3d, if 
     // //you want to use, you also need to uncomment the code in lib/triangulation to do this
+    // //not used now cause the sgb, have no space to optimize
 
 
 
-    //*****************************************
-    //this is for movenet
+
+    // //*****************************************
+    // //this is for movenet
 
 
-    // for the vectexs, there are 17 points in total for the person, the frist 5, index 0~4 is nose, left eye, right eye, left ear, right ear, ignore for now
-    // the vec_inds is the edge that two vectex should be the index of this:
-    // index 5:left shoulder
-    // index 6:right shoulder
-    // index 7:left elbow
-    // index 8:right elbow
-    // index 9:left hand
-    // index 10:right hand
-    // index 11:left hip
-    // index 12:right hip
-    // index 13:left knee
-    // index 14:right knee
-    // index 15:left foot
-    // index 16:right foot
+    // //for the vectexs, there are 17 points in total for the person, the frist 5, index 0~4 is nose, left eye, right eye, left ear, right ear, ignore for now
+    // //the vec_inds is the edge that two vectex should be the index of this:
+    // //index 5:left shoulder
+    // //index 6:right shoulder
+    // //index 7:left elbow
+    // //index 8:right elbow
+    // //index 9:left hand
+    // //index 10:right hand
+    // //index 11:left hip
+    // //index 12:right hip
+    // //index 13:left knee
+    // //index 14:right knee
+    // //index 15:left foot
+    // //index 16:right foot
 
-    // so the vec_inds represents: 
-    //  shoulder    right_upper_arm    right_lower_arm    left_upper_arm    left_lower_arm    right_upper_leg    right_lower_leg    left_upper_leg    left_lower_leg    right_shoulder_hip   left_shoulder_hip     hip
+    // //so the vec_inds represents: 
+    // //shoulder    right_upper_arm    right_lower_arm    left_upper_arm    left_lower_arm    right_upper_leg    right_lower_leg    left_upper_leg    left_lower_leg    right_shoulder_hip   left_shoulder_hip     hip
 
     std::vector<std::vector<int>> vec_inds = {
         {6, 5},         {6, 8},            {8, 10},          {5, 7},             {7, 9},          {12, 14},          {14, 16},          {11, 13},         {13, 15},         {6, 12},            {5, 11},         {12, 11}
     };
 
+    // //right now just get the largest box
     std::vector<float> box1;
 
+    // //just get the largest bbox for now,
     box1=findLargestBBox(results1);
 
+
+    // //get the bbox coord
     int x1 = std::max(0, static_cast<int>(box1[0] - 0.05 * (box1[2] - box1[0])));
     int y1 = std::max(0, static_cast<int>(box1[1] - 0.05 * (box1[3] - box1[1])));
     int x2 = std::min(rectifiedL.cols, static_cast<int>(box1[2] + 0.05 * (box1[2] - box1[0])));
     int y2 = std::min(rectifiedL.rows, static_cast<int>(box1[3] + 0.05 * (box1[3] - box1[1])));
 
-    // Crop and save the image
+
+    // //Crop and save the image
     cv::Rect cropRect(x1, y1, x2 - x1, y2 - y1);
     cv::Mat crop1 = rectifiedL(cropRect);
 
-    //add time
+    // //add time
     auto start_movenet = std::chrono::high_resolution_clock::now();
 
+    // //now the left is a list of (list of 2d points for each augmentation), 
     std::vector<std::vector<Keypoint>> left=process_movenet_augmentation(movenet_interpreter, crop1, movenet_threshold, loop_theshold, true);
 
 
@@ -251,27 +262,33 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
     std::chrono::duration<float, std::milli> movenet_duration = end_movenet - start_movenet;
     std::cout << "movenet time: " << movenet_duration.count() << " ms" << std::endl;
 
-
-
-
-
+    // //this is similar with left, a list of (list of mag for each augmentation)
     std::vector<std::vector<float>> list_of_mag;
 
+    // //this is for saving the rectified images, to draw on it
     cv::Mat rectifiedL_copy=rectifiedL.clone();
     cv::Mat rectifiedR_copy=rectifiedR.clone();
 
+    // //this is for the saving the original images, to draw on it
     cv::Mat left_copy = imgL.clone();
     cv::Mat right_copy=imgR.clone();
 
-
+    // //just to get the right shoulder to determine if the person is front face to camera or back to camera
     std::vector<float> right_shoulder;
 
+
+    // //this is for drawing on the rectified images, stereo the variable
     std::vector<std::vector<Keypoint>> left_2d;
     std::vector<std::vector<Keypoint>> right_2d;
 
+    // //this is for drawing on the original images, stereo the variable
     std::vector<std::vector<Keypoint>> left_2d_origin;
     std::vector<std::vector<Keypoint>> right_2d_origin;
 
+
+
+
+    // //left is a list of (list of 2d points), the outer loop is for each augmentation, the inner is for the 17 points of human parts
     for (int i=0;i< left.size();i++){
 
         //add time
@@ -279,14 +296,24 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
 
         auto start_deepssim_and_triangulation_per_aug = std::chrono::high_resolution_clock::now();
 
-
         std::vector<Keypoint> left_converted;
+
+        // //collect the points just for drawing on rectified images
+        
         std::vector<Keypoint> right_converted;
 
+        // //collect the points for drawing on origin
         std::vector<Keypoint> left_converted_origin;
         std::vector<Keypoint> right_converted_origin;
+        // //end of drawing variable
+
+        // // //this is for the 2d point input to opencv
+        // std::vector<cv::Point2f> pts1, pts2;
+        // std::vector<cv::Point2f> undistortedPts1, undistortedPts2;
 
 
+
+        // //this function converted back the points on the cropped bbox image to original
         for (const auto& point : left[i]) {
             // cv::Point center(static_cast<int>(point.x), static_cast<int>(point.y));
             // cv::circle(crop1, center, 2, cv::Scalar(0, 255, 0), -1);
@@ -297,16 +324,18 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
             Keypoint temp={x_adj, y_adj};
             left_converted.push_back(temp);
         }
-        left_2d.push_back(left_converted);
+        if(draw){left_2d.push_back(left_converted);}
 
 
-        //end of movenet
 
-        //*****************************************
-        //start to use the result of movenet to get the 3d point
+        // //end of movenet
+
+        // //*****************************************
+        // //start to use the result of movenet to get the 3d point
 
         // auto start = std::chrono::high_resolution_clock::now(); // Start timing before the loop
 
+        // //load camera parameters
         cv::Mat H1=camera_config["H1"];
         cv::Mat H2=camera_config["H2"];
 
@@ -321,41 +350,41 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
         cv::Mat R=camera_config["R"];
         cv::Mat T=camera_config["T"];
 
+        // //this is for the opencv method
+        // cv::Mat P1=camera_config["P1"];
+        // cv::Mat P2=camera_config["P2"];
+
+        // cv::Mat D1=camera_config["D1"];
+        // cv::Mat D2=camera_config["D2"];
+        // //end of opencv method
+
+
+        // //this is the aiming 3d points expect to output.
         std::vector<cv::Vec3f> depth_3d;
 
+        // //this means for each augmentation, the left_converted is for this augmentation
         for (const auto& keypoint : left_converted) {
             int tempx = static_cast<int>(keypoint.x);
             int tempy = static_cast<int>(keypoint.y);
 
 
-            // // Clamp tempx and tempy to the valid range of the points_3d matrix
-            // tempx = std::max(0, std::min(tempx, points_3d.cols - 1));
-            // tempy = std::max(0, std::min(tempy, points_3d.rows - 1));
-            // std::cout << tempx <<" " << tempy << std::endl;
-
-            
-
-            //should calculate on the padding
+            // //should calculate on the padding
             tempx+=padding_size;
             tempy+=padding_size;
 
             std::pair<int, int> result_point = cmp.search_image(feature_interpreter, tempx, tempy, 224, 224);
 
-            //minus padding to get the position on original
+            // //minus padding to get the position on original
             result_point.first -= padding_size;
             result_point.second -= padding_size;
 
+            // //also minus padding for left
             tempx-=padding_size;
             tempy-=padding_size;
 
-            // add the point to right 2d for drawing purpose
+            // //add the point to right 2d for drawing purpose
             Keypoint temp_right={static_cast<float>(result_point.first), static_cast<float>(result_point.second)};
             right_converted.push_back(temp_right);
-
-
-
-            // std::cout << tempx << " " << tempy << " "<< result_point.first << " "<< result_point.second <<std::endl;
-
 
 
             // // tempx tempy is left point, result_point.first result_point.second is right point
@@ -364,6 +393,15 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
 
             cv::Point2i p2(result_point.first, result_point.second);
 
+            // //this is the opencv method
+            // pts1.push_back(p1);
+
+            // pts2.push_back(p2);
+            //// end of opencv method
+
+            // //evan's code for triangulation
+
+            // //first project rectified to origin image(undistored image after the very furst calibration)
             cv::Mat p1_mat = (cv::Mat_<double>(3, 1) << p1.x, p1.y, 1.0f);
             cv::Mat pp1_mat = H1_inverse * p1_mat;
             cv::Point2f pp1(pp1_mat.at<double>(0) / pp1_mat.at<double>(2), pp1_mat.at<double>(1) / pp1_mat.at<double>(2));
@@ -373,54 +411,29 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
             cv::Point2f pp2(pp2_mat.at<double>(0) / pp2_mat.at<double>(2), pp2_mat.at<double>(1) / pp2_mat.at<double>(2));
 
 
-            // // draw on the origin image
-            Keypoint temp_left_origin={static_cast<float>(pp1_mat.at<double>(0) / pp1_mat.at<double>(2)), static_cast<float>(pp1_mat.at<double>(1) / pp1_mat.at<double>(2))};
-            left_converted_origin.push_back(temp_left_origin);
+            if(draw){
+                // // draw on the origin image
+                Keypoint temp_left_origin={static_cast<float>(pp1_mat.at<double>(0) / pp1_mat.at<double>(2)), static_cast<float>(pp1_mat.at<double>(1) / pp1_mat.at<double>(2))};
+                left_converted_origin.push_back(temp_left_origin);
 
-            
-            Keypoint temp_right_origin={static_cast<float>(pp2_mat.at<double>(0) / pp2_mat.at<double>(2)), static_cast<float>(pp2_mat.at<double>(1) / pp2_mat.at<double>(2))};
-            right_converted_origin.push_back(temp_right_origin);
+                // //draw on the right
+                Keypoint temp_right_origin={static_cast<float>(pp2_mat.at<double>(0) / pp2_mat.at<double>(2)), static_cast<float>(pp2_mat.at<double>(1) / pp2_mat.at<double>(2))};
+                right_converted_origin.push_back(temp_right_origin);
+            }
 
 
 
+            // //this is the point in the original image
             std::vector<std::vector<cv::Point2f>> tp2(1, std::vector<cv::Point2f>(1, pp2));
             std::vector<std::vector<cv::Point2f>> tp1(1, std::vector<cv::Point2f>(1, pp1));
 
-
-            // std::cout << "---------------tp1: " << std::endl;
-            // // Iterating through the 2D vector to print each cv::Point2f
-            // for (const auto &innerVec : tp1) {
-            //     for (const auto &point : innerVec) {
-            //         std::cout << "(" << point.x << ", " << point.y << ") ";
-            //     }
-            //     std::cout << std::endl; // New line for each inner vector
-            // }
-
-            // std::cout << "---------------tp2: " << std::endl;
-            // for (const auto &innerVec : tp2) {
-            //     for (const auto &point : innerVec) {
-            //         std::cout << "(" << point.x << ", " << point.y << ") ";
-            //     }
-            //     std::cout << std::endl; // New line for each inner vector
-            // }
-
-            // std::cout  << std::endl;
-
-            // std::cout<<"tps:"<<std::endl<<pp1<<pp2<<std::endl<<std::endl;
-
+            // //enter evan's triangulation
             std::vector<cv::Point3f> finalResult = triangulatePoints(K1, K2, R, T, tp1, tp2);
 
-            // std::cout << "-----" <<std::endl;
-
-            // for(const auto& point : finalResult) {
-            //     std::cout << "(" << point.x << ", " << point.y << ", " << point.z << ")" << std::endl;
-            // }       
-
-            
-
+            // //this list just contain one pair of point, the format is to suit evan;s function, can be refactored later
             assert (1==finalResult.size() );
 
-
+            // //convert the result to store the list of 3d points
             if (!finalResult.empty()) {
                 // Convert the first cv::Point3f to cv::Vec3f and add it to depth_3d
                 const cv::Point3f& firstPoint = finalResult.front(); // Get the first point
@@ -430,19 +443,56 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
                 std::cout << "finalResult is empty!" << std::endl;
             }
 
+            //end of evan's code
+
+
+
+
+
+            
+
 
         }
-
+        
+        if(draw){
+        // //this is just for drawing
         right_2d.push_back(right_converted);
 
 
         left_2d_origin.push_back(left_converted_origin);
         right_2d_origin.push_back(right_converted_origin);
+        // //this three list
+
+        }
 
 
 
+        // // //opencv's way for triangulation
+        // //handling 2d points in one time
+        // cv::undistortPoints(pts1, undistortedPts1, K1, D1, cv::noArray(), K1);
+        // cv::undistortPoints(pts2, undistortedPts2, K2, D2, cv::noArray(), K2);
+
+        // cv::Mat points4D;
+        // cv::triangulatePoints(P1, P2, undistortedPts1, undistortedPts2, points4D);
+        
+
+        // cv::Mat points3D;
+        // cv::convertPointsFromHomogeneous(points4D.t(), points3D);
 
 
+        // // std::vector<cv::Vec3f> depth_3d;
+
+        // // Assuming points3D is a Nx1 3-channel matrix where each element is a 3D point
+        // for (int i = 0; i < points3D.rows; i++) {
+        //     // Access each 3D point in the points3D matrix
+        //     cv::Vec3f point = points3D.at<cv::Vec3f>(i, 0);
+        //     depth_3d.push_back(point);
+        // }
+        // // //end of opencv's way
+
+
+
+        // //this is the code for printing the 3d points
         // for (const auto& point : depth_3d) {
         //     std::cout << "3D Point: x = " << point[0] << ", y = " << point[1] << ", z = " << point[2] << std::endl;
         // }
@@ -450,25 +500,26 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
         // std::cout << "----------" << std::endl;
 
 
-
-        // assert (0==1);
-
+        // //get the 5th point to know the front and back
         cv::Vec3f sixthElement = depth_3d[5];
 
-        // Access the third component (index 2) of the cv::Vec3f
+        // //Access the third component (index 2) of the cv::Vec3f
         float thirdComponent = sixthElement[2];
 
         right_shoulder.push_back(thirdComponent);
 
+        // //calculate the distance based on the vec_ind
         std::vector<float> distances = calculateDistances(depth_3d, vec_inds);
 
+        // //store the 3d points to list of mag
         list_of_mag.push_back(distances);
 
+        // //this is for printing out the depth-3d
         for (const auto &vec : depth_3d) {
             std::cout << "(" << vec[0] << ", " << vec[1] << ", " << vec[2] << ")" << std::endl;
         }
 
-
+    // //just for printing
     std::cout << "Printing out the signiture: " << std::endl;
     // Iterating through the 2D vector to print each float
     for (const auto &innerVec : list_of_mag) {
@@ -499,77 +550,78 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
 
     }
 
+    if(draw){
+        // //filename for drawing
+        std::size_t lastSlashIndex = imgf1.find_last_of("/\\");
+        std::string filename = imgf1.substr(lastSlashIndex + 1); 
+
+        // //this is for the left, draw on rectified
+        std::vector<Keypoint> averageKeypoints = calculateAverageKeypoints(left_2d);
+
+        for (int i=5; i< averageKeypoints.size();i++){
+            cv::Point center(static_cast<int>(averageKeypoints[i].x), static_cast<int>(averageKeypoints[i].y));
+            cv::circle(rectifiedL_copy, center, 4, cv::Scalar(0, 255, 0), -1);
+
+        }
 
 
-    //this is for the left
-    std::vector<Keypoint> averageKeypoints = calculateAverageKeypoints(left_2d);
+        std::string outputPath_left = "./rectified_output/left/"  + filename;
+        cv::imwrite(outputPath_left, rectifiedL_copy);
 
-    for (int i=5; i< averageKeypoints.size();i++){
-        cv::Point center(static_cast<int>(averageKeypoints[i].x), static_cast<int>(averageKeypoints[i].y));
-        cv::circle(rectifiedL_copy, center, 4, cv::Scalar(0, 255, 0), -1);
 
+        // //this is for the right, draw on rectified
+        std::vector<Keypoint> averageKeypoints_right = calculateAverageKeypoints(right_2d);
+
+        for (int i=5; i< averageKeypoints_right.size();i++){
+            cv::Point center(static_cast<int>(averageKeypoints_right[i].x), static_cast<int>(averageKeypoints_right[i].y));
+            cv::circle(rectifiedR_copy, center, 4, cv::Scalar(0, 255, 0), -1);
+
+        }
+
+        std::string outputPath_right = "./rectified_output/right/"  + filename;
+        // std::cout << outputPath_right << std::endl;
+        cv::imwrite(outputPath_right, rectifiedR_copy);
+
+
+        // //****** now draw on origin image
+
+        std::vector<Keypoint> averageKeypoints_left_origin = calculateAverageKeypoints(left_2d_origin);
+
+        for (int i=5; i< averageKeypoints_left_origin.size();i++){
+            cv::Point center(static_cast<int>(averageKeypoints_left_origin[i].x), static_cast<int>(averageKeypoints_left_origin[i].y));
+            cv::circle(left_copy, center, 4, cv::Scalar(0, 255, 0), -1);
+
+        }
+
+
+        std::string outputPath_left_origin = "./origin_output/left/"  + filename;
+        cv::imwrite(outputPath_left_origin, left_copy);
+
+        //for the right origin
+        std::vector<Keypoint> averageKeypoints_right_origin = calculateAverageKeypoints(right_2d_origin);
+
+        for (int i=5; i< averageKeypoints_right_origin.size();i++){
+            cv::Point center(static_cast<int>(averageKeypoints_right_origin[i].x), static_cast<int>(averageKeypoints_right_origin[i].y));
+            cv::circle(right_copy, center, 4, cv::Scalar(0, 255, 0), -1);
+
+        }
+
+
+        std::string outputPath_right_origin = "./origin_output/right/"  + filename;
+        cv::imwrite(outputPath_right_origin, right_copy);
+
+        
+
+        
+        // //end of drawing
     }
 
 
-    std::size_t lastSlashIndex = imgf1.find_last_of("/\\");
-    std::string filename = imgf1.substr(lastSlashIndex + 1); output_folder ;
-
-    std::string outputPath = output_folder  + filename;
-    cv::imwrite(outputPath, rectifiedL_copy);
-
-
-    //this is for the right
-    std::vector<Keypoint> averageKeypoints_right = calculateAverageKeypoints(right_2d);
-
-    for (int i=5; i< averageKeypoints_right.size();i++){
-        cv::Point center(static_cast<int>(averageKeypoints_right[i].x), static_cast<int>(averageKeypoints_right[i].y));
-        cv::circle(rectifiedR_copy, center, 4, cv::Scalar(0, 255, 0), -1);
-
-    }
-
-
-    // std::size_t lastSlashIndex = imgf1.find_last_of("/\\");
-    // std::string filename = imgf1.substr(lastSlashIndex + 1); output_folder ;
-
-    std::string outputPath_right = "./output_right/"  + filename;
-    std::cout << outputPath_right << std::endl;
-    cv::imwrite(outputPath_right, rectifiedR_copy);
-
-    // //****** now draw on origin image
-
-    std::vector<Keypoint> averageKeypoints_left_origin = calculateAverageKeypoints(left_2d_origin);
-
-    for (int i=5; i< averageKeypoints_left_origin.size();i++){
-        cv::Point center(static_cast<int>(averageKeypoints_left_origin[i].x), static_cast<int>(averageKeypoints_left_origin[i].y));
-        cv::circle(left_copy, center, 4, cv::Scalar(0, 255, 0), -1);
-
-    }
-
-
-    std::string outputPath_left_origin = "./origin/left/"  + filename;
-    cv::imwrite(outputPath_left_origin, left_copy);
-
-    //for the right origin
-    std::vector<Keypoint> averageKeypoints_right_origin = calculateAverageKeypoints(right_2d_origin);
-
-    for (int i=5; i< averageKeypoints_right_origin.size();i++){
-        cv::Point center(static_cast<int>(averageKeypoints_right_origin[i].x), static_cast<int>(averageKeypoints_right_origin[i].y));
-        cv::circle(right_copy, center, 4, cv::Scalar(0, 255, 0), -1);
-
-    }
-
-
-    std::string outputPath_right_origin = "./origin/right/"  + filename;
-    cv::imwrite(outputPath_right_origin, right_copy);
-
-    
-    //end of drawing
-
-    //add time
+    // //add time
     auto start_post_processing = std::chrono::high_resolution_clock::now();
 
 
-    //test effective range
+    // //test effective range
     float sum = std::accumulate(right_shoulder.begin(), right_shoulder.end(), 0.0f);
     float average = 0.0f;
 
@@ -577,16 +629,17 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
         average = sum / static_cast<float>(right_shoulder.size());
     }
 
-    Frame frame=Frame();
+    Frame frame=Frame(); // this is variable to return, return none if not valide
 
     // std::cout << average << "--" << effective_range << std::endl;
+    // //if it is in the range
     if(average<effective_range){
 
 
-
+        // //get the variance
         std::vector<std::vector<float>> variance_vector_list;
 
-        
+        // //get the variance vector
         for (int i=0;i<vec_inds.size();i++){
             std::vector<float> temp;
 
@@ -604,6 +657,7 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
 
         int count=0;
 
+        // //based on the number of augmentation to get the variance vector
         for(int i=0;i<variance_vector_list.size();i++){
             float variance = calculateVariance(variance_vector_list[i]);
             if ((variance>0)&&(variance<variance_threshold )){
@@ -614,6 +668,7 @@ Frame process_eachframe(const std::unique_ptr<tflite::Interpreter>& detection_in
             }
         }
 
+        // //count the number of points in a good variance 
         if (count> required_variance_point){
             frame=merge(variance_vector_list, imgf1, imgf2);
         }
@@ -671,8 +726,8 @@ int main(int argc, char **argv) {
     //end of detection model
 
 
-    //for movenet model
-    //prepare the intrepreter of movenet    
+    ////for movenet model
+    ////prepare the intrepreter of movenet    
     std::unique_ptr<tflite::FlatBufferModel> movenet_model=tflite::FlatBufferModel::BuildFromFile("../movenet/movenet.tflite");
     tflite::ops::builtin::BuiltinOpResolver movenet_resolver;
     std::unique_ptr<tflite::Interpreter> movenet_interpreter;
@@ -680,10 +735,10 @@ int main(int argc, char **argv) {
 
     movenet_interpreter->SetAllowFp16PrecisionForFp32(false);
     movenet_interpreter->AllocateTensors();
-    //end of movenet model
+    ////end of movenet model
 
 
-    //for feature extractor model
+    ////for feature extractor model
     std::unique_ptr<tflite::FlatBufferModel> feature_model =
     tflite::FlatBufferModel::BuildFromFile("../deep_ssim/mobilenetv2_quant_int8.tflite");
 
@@ -701,11 +756,11 @@ int main(int argc, char **argv) {
 
     // std::string left_dir = "./part/left/";
     // std::string right_dir = "./part/right/";
-    std::string left_dir = "./single/left/";
-    std::string right_dir = "./single/right/";
-    std::string output_folder = "./output/";
+    std::string left_dir = "./dataset/single/left/";
+    std::string right_dir = "./dataset/single/right/";
+    
 
-    // Get list of files in left directory
+    // //Get list of files in left directory
     std::vector<std::string> left_files;
     for (const auto& entry : fs::directory_iterator(left_dir)) {
         if (entry.path().extension() == ".jpg") {
@@ -715,15 +770,15 @@ int main(int argc, char **argv) {
     std::sort(left_files.begin(), left_files.end(), sortNumerically);
 
 
-    //collect valid frames
+    ////collect valid frames
     std::vector<std::string> valid_frames_names;
 
-    //collect valid vectors
+    ////collect valid vectors
     std::vector<Frame> valid_frames;
 
 
     for (const auto& file_name : left_files) {
-        // Replace 'left' with 'right' in the filename
+        // //Replace 'left' with 'right' in the filename
         std::string right_file_name = std::regex_replace(file_name, std::regex("left"), "right");
 
         std::string left_file_path = left_dir + file_name;
@@ -735,8 +790,8 @@ int main(int argc, char **argv) {
             cv::Mat frameR = cv::imread(left_file_path);
             cv::Mat frameL = cv::imread(right_file_path);
 
-
-            Frame frame=process_eachframe(detection_interpreter, movenet_interpreter, feature_interpreter,left_file_path, right_file_path, output_folder);
+            // //process each frame to get a frame object
+            Frame frame=process_eachframe(detection_interpreter, movenet_interpreter, feature_interpreter,left_file_path, right_file_path, true);
             frame.printMeanAndRange();
 
             if (!frame.isEmpty()) {
@@ -750,13 +805,16 @@ int main(int argc, char **argv) {
         }
     }
 
+    // //print out the valid frames
     std::cout << "Valid Frames:" << std::endl;
     for (const std::string& frame : valid_frames_names) {
         std::cout << frame << " ";
     }    
 
+    // //the pair is the centers of 2 close frames
     std::vector<std::pair<size_t, size_t>> pair_index;
 
+    // //post processing algorithm to get the mag
     if (valid_frames.size() < 1) {
         std::cout << "no enough valid frames" << std::endl;
     } else {
@@ -771,6 +829,7 @@ int main(int argc, char **argv) {
         }
         std::cout << std::endl;
 
+        // //sorted the pair of close mag and use a threshold to get the "good" centers
         std::vector<size_t> indices_sorted(adjacent_result.size());
         std::iota(indices_sorted.begin(), indices_sorted.end(), 0);
         std::sort(indices_sorted.begin(), indices_sorted.end(), [&](size_t i, size_t j) { return adjacent_result[i] > adjacent_result[j]; });
@@ -789,11 +848,11 @@ int main(int argc, char **argv) {
 
     std::cout << "----------" << std::endl;
 
+    // //passing to the dataset and handling
     std::vector<Frame> local_database = process_frames(valid_frames, pair_index, intersect_threshold, boundary_threshold, distri, map_probs );
 
     for (const auto& frame : local_database) {
         frame.printDetails();
-        std::cout << "------------------" << std::endl;
     }
 
 

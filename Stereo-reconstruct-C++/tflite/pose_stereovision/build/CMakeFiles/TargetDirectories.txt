@@ -1,3 +1,0 @@
-/home/myd/Desktop/Stereo-reconstruct-C++/tflite/pose_stereovision/build/CMakeFiles/rebuild_cache.dir
-/home/myd/Desktop/Stereo-reconstruct-C++/tflite/pose_stereovision/build/CMakeFiles/edit_cache.dir
-/home/myd/Desktop/Stereo-reconstruct-C++/tflite/pose_stereovision/build/CMakeFiles/TFLiteImageClassification.dir
